@@ -1,0 +1,17 @@
+{
+  "name": "application-name",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "start": "nodemon server.js"
+  },
+  "dependencies": {
+    "browserify-middleware": "^2.5.0",
+    "ejs": "*",
+    "express": "3.5.1",
+    "nodemon": "^1.0.17",
+    "serve-favicon": "^2.0.1",
+    "shortid": "^2.0.1",
+    "socket.io": "^1.0.6"
+  }
+}

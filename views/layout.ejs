@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= title %></title>
+    <link rel="icon" type="image/png" href="/img/favicon.ico" />
+    <link rel='stylesheet' href='/css/style.css' />
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      var serverID = "<%= serverID %>";
+    </script>
+  </head>
+  <body>
+    <% include body %>
+    <script src="/js/fixes.js"></script>
+    <script src="/js/client.js"></script>
+  </body>
+</html>
