@@ -1,0 +1,16 @@
+body {
+	background: rgb(255, 255, 0);
+  padding: 50px;
+  font: 14px "Lucida Grande", Helvetica, Arial, sans-serif;
+}
+
+a {
+  color: #00B7FF;
+}
+
+.controls {
+  text-align: center;
+}
+.clear_button {
+  font-size: 14pt;
+}
