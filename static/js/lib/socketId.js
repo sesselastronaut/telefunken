@@ -20,8 +20,8 @@ function socketId(socket) {
         break;
 
       case 'allConnected':
+        //console.log('Socket status allconnected received : ', type);
         that.allConnected();
-        //console.log('Socket status allconnected received : ', that.allConnected);
         break;
     }
   });

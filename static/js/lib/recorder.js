@@ -42,7 +42,7 @@ Recorder.prototype.setupSave = function(filename) {
   save.href = url;
   save.disabled = false;
   save.download = filename;
-  console.log(audioBlob);
+  //console.log(audioBlob);
 };
 
 

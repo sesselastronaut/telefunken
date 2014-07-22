@@ -42,20 +42,21 @@ io.on('connection', function(socket) {
 	//receiving\\\\\\\\\
 	socket.on('message', function(message) {
 		var type = message.type;
+		console.log(message);
 		switch (type) {
-			case 'sending_max_array':
-				saveMaxarraysamples(message.data);
+			case 'sendingMaxArray':
+				saveMaxarraysamples(message.values);
 				break;
 		}
 	});
 
-	function saveMaxarraysamples(data) {
-		var ringSamples = data.samplearray;
-		var id = data.myID;
+	function saveMaxarraysamples(values) {
+		var samplearray = values.samplearray;
+		var id = values.myID;
 		var filename = id + '-event' + ".csv";
 		console.log('saving: ' + id + '-event' + ".csv");
-		fs.writeFileSync(path.join('./data', filename), ringSamples.toString());
-		//combine files with: 'pr -tmJ phone1-event.csv phone2-event.csv > phones.csv'
+		fs.writeFileSync(path.join('./data', filename), samplearray.toString());
+		//combine files into one file with: 'pr -tmJ phone1-event.csv phone2-event.csv > phones.csv'
 	}
 	
 });

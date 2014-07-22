@@ -3,6 +3,7 @@ window.audioContext = window.audioContext || new AudioContext();
 
 document.addEventListener('DOMContentLoaded', init);
 
+
 // General helper functions
 // ------------------------
 
@@ -45,24 +46,19 @@ function setConnectionStatus(status) {
 }
 
 function microReady(stream) {
-  //display phone ID in UI
+	//display phone ID in UI
 	document.querySelector('h1 span').innerHTML = sockId.id;
 
-  auProc.id = sockId.id;
-  sockId.micReady();
-  sockId.allConnected = function() {
+	auProc.id = sockId.id;
+	sockId.micReady(); //emit mic ready
+	sockId.allConnected = function() {
 		auProc.init(stream);
 		document.querySelector('.status-holder').innerHTML = '--all in - let\'s synchronize--';
-  };
+	};
 }
 
 
 function init() {
-
-	//platform check
-/*	cosima.check.platform();
-	var osVersion = parseVersionString(platform.os.version);*/
-	//console.log(platform.os.family);
 
 	sockId = socketId(socket);
 	
