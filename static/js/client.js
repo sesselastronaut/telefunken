@@ -28,13 +28,16 @@ function loadFile(url, cb) {
 var socket = io(document.URL);
 var sockId;
 
-//receiving\\\\\\\\\
+//receiving from server\\\\\\\\\
 socket.on('message', function(message) {
 	var type = message.type;
 	console.log('message type received: ', message.type);
 	switch (type) {
-			case 'connectionStatus':
+		case 'connectionStatus':
 			setConnectionStatus(message.data);
+			break;
+		case 'timeReset':
+			auProc.resetTimeSync();
 			break;
 	}
 });
@@ -44,6 +47,10 @@ function setConnectionStatus(status) {
 	console.log('status received: ', status);
 	document.querySelector('.status-holder').innerHTML = status;
 }
+
+// function resetTime {
+
+// }
 
 function microReady(stream) {
 	//display phone ID in UI
@@ -72,9 +79,18 @@ function init() {
 
 	//clear buttoni
 	document.querySelector(".clear_button").addEventListener('click', function() {
-		////////emitting to client
+		////////emitting to server
 		socket.emit('message', {
 			type: 'clear',
+			data: sockId.id
+		});
+	});
+
+	//reset buttoni
+	document.querySelector(".reset_button").addEventListener('click', function() {
+		////////emitting to server
+		socket.emit('message', {
+			type: 'resetTime',
 			data: sockId.id
 		});
 	});

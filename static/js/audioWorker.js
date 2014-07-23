@@ -1,6 +1,6 @@
 
 var playbackTime = 0;
-var playbackCount = 0;
+//var playbackCount = 0;
 
 var recordingTime = 2;
 
@@ -13,6 +13,9 @@ var syncCount = 0;
 
 var lastSample = 0;
 var lastLastSample = 0;
+
+var lastRefSample = 0;
+var lastEdge = -1;
 
 var maxSample = -999;
 var maxSampleTime = 99999999999;
@@ -37,7 +40,10 @@ this.onmessage = function(e){
       init(e.data);
       break;
     case 'processaudio':
-      audioProcessing(e.data.frame);
+      audioProcessing(e.data.inputFrame, e.data.timeRefFrame);
+      break;
+    case 'resetTimeSync':
+      syncOnOnset = true;
       break;
   }
 };
@@ -50,20 +56,48 @@ function init (data){
   //console.log(data.values.sampleRate);
 }
 
-function audioProcessing (frame){
+function audioProcessing (inputFrame, timeRefFrame){
   var time = playbackTime;
-  var count = playbackCount;
+  //var count = playbackCount;
   var timeIncr = 1.0 / sampleRate;
+  var edge = -1;
 
   //console.log(sampleRate);
 
-  //audio analysis                        
-  for (var i = 0; i < frame.length; i++) {
+  //analysis of oscillator on channel 1 to detect gaps
+  for (var k = 0; k < timeRefFrame.length; k++) {
+    var refSample = timeRefFrame[k];
+
+    if (lastRefSample < 0.5 && refSample > 0.5) {
+      edge = k;
+      break;
+    }
+
+    this.lastRefSample = refSample;
+  }
+
+  if (lastEdge < 0)
+    lastEdge = edge;
+
+  var gap = lastEdge - edge;
+
+  if (gap < 0)
+    gap += timeRefFrame.length;
+
+  if (gap !== 0)
+    console.log('gap:' + gap);
+
+  time += gap * timeIncr;
+  //count += gap;
+
+  lastEdge = edge;
 
 
+  //audio analysis of microphone input on channel 0                         
+  for (var i = 0; i < inputFrame.length; i++) {
 
-    var sample = Math.abs(frame[i]);
-    ringSamples[ringIndex] = sample; //frame[i];
+    var sample = Math.abs(inputFrame[i]);
+    //ringSamples[ringIndex] = sample; //inputFrame[i];
 
     //start maxdetection----------------------------------------------      
     if (time > (maxSampleTime + maxTimeOut) && maxSampleTime > lastOnsetTime) {
@@ -75,41 +109,13 @@ function audioProcessing (frame){
       // console.log('_________time: ' + time);
       // console.log('lastOnsetTime: ' + lastOnsetTime);
 
-      var ringStartCount = count - ringSize;
-      var maxRingIndex = maxSampleCount - ringStartCount;
-
-      // debugtime(maxSampleTime - syncTime);
-      //console.log(maxSampleTime - syncTime);
-
-      /*          var initialRingSamples = []; //setup an array to write the initial ringsamples for debugging
-          for (var j = 0; j < ringSamples.length; j++) {
-            var k = (j + ringIndex) % ringSize;
-
-            initialRingSamples[j] = ringSamples[k];
-            //console.log ('k',k, 'j',j,'samplevalue',initialRingSamples [j], 'maxSampleTime', maxSampleTime);
-
-            if (j === maxRingIndex) {
-              // console.log('maximum value: ', ringSamples[k]);
-              //print value of sample at maximum on screen
-              // debugsamplevalue(ringSamples[k]);
-              //initialRingSamples [maxRingIndex] = ringSamples[k];
-            } else {
-              //console.log('......', j, ':', ringSamples[k]);
-              //initialRingSamples [j] = ringSamples[k];
-            }
-          }*/
-
-      // WHEN PROCESS IS RUNNING NO UI NO DEBUG NO SOCKET
-      // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-
       //use first onset as sync
       if (syncOnOnset === true) {
 
         //console.log(maxSampleTime - syncTime);
         syncOnOnset = false;
         syncTime = maxSampleTime;
-        syncCount = maxSampleCount;
+        //syncCount = maxSampleCount;
         maxSampleTimesCounter = 0;
 
         //comment this!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -117,27 +123,29 @@ function audioProcessing (frame){
         //console.log('-- sychronized time now: ' + (maxSampleTime - syncTime));
         //comment this!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-      } else if (maxSampleTimes.length < 5) {
-        maxSampleTimes[maxSampleTimesCounter] = maxSampleTime - syncTime;
-        maxSampleTimesCounter++;
-        //play();
-        //console.log('maxSampleTimes: ', maxSampleTimes.length);
-        //console.log('-- maximum at time: ', maxSampleTime - syncTime);
+      // } else if (maxSampleTimes.length < 5) {
+      //   maxSampleTimes[maxSampleTimesCounter] = maxSampleTime - syncTime;
+      //   maxSampleTimesCounter++;
+      //   //play();
+      //   //console.log('maxSampleTimes: ', maxSampleTimes.length);
+      //   //console.log('-- maximum at time: ', maxSampleTime - syncTime);
       } else { //stop that.recording and send max array to server
-        console.log('---stopping---');
-        
+        //console.log('---stopping---');
+        maxSampleTimesCounter++;
+
         this.postMessage ( {
           type: 'through', //'sending_max_array',
           sub: {
-            type: 'sendingMaxArray',
+            type: 'sendingMaximumTime', //sendingMaxArray',
             values: {
               myID: id,
-              samplearray: maxSampleTimes.join('\n')
+              maxTime: (maxSampleTime - syncTime), //maxSampleTimes.join('\n')
+              //count: maxSampleTimesCounter
             }
           }
         });
 
-        this.postMessage ( {type: 'stopRecording'});
+        //this.postMessage ( {type: 'stopRecording'});
         
       }
 
@@ -152,23 +160,23 @@ function audioProcessing (frame){
 
         maxSample = sample;
         maxSampleTime = time;
-        maxSampleCount = count;
+        //maxSampleCount = count;
 
       }
     }
 
-    ringIndex = (ringIndex + 1) % ringSize;
+    //ringIndex = (ringIndex + 1) % ringSize;
     lastLastSample = lastSample;
     lastSample = sample;
 
     //end maxdetection----------------------------------------------
 
     time += timeIncr;
-    count++;
+    //count++;
 
   }
 
-  playbackCount += bufferSize;
+  //playbackCount += bufferSize;
   playbackTime += bufferSize / sampleRate;
 
 }

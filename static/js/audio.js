@@ -8,7 +8,7 @@ var auProc = {
 
 
   sampleThreshold: 0.189, //Linux = 0.32
-  sampleThresholdPhone: 0.55, //nexus 3 = 0.7
+  sampleThresholdPhone: 0.7, //nexus 3 = 0.7 nexus 4 = 0.55
 
   recordingTime: 2,
 
@@ -21,12 +21,22 @@ var auProc = {
     if(a[0] === "Android") this.sampleThreshold = this.sampleThresholdPhone;
   },
 
+  resetTimeSync: function(){
+    this.worker.postMessage({
+      command: 'resetTimeSync',
+      values: {
+        syncOnOnset: true
+      }
+    });
+  },
+
 
   // Entry point
   init: function init(stream) {
     var that = this;
 
     //console.log('posting init to worker');
+    ////sending init to worker
     this.worker.postMessage({
       command: 'init',
       values: {
@@ -37,13 +47,33 @@ var auProc = {
       }
     });
 
+
+    this.oscillatorNode = audioContext.createOscillator();
+    this.oscillatorNode.type = 1; //2;
+    this.oscillatorNode.frequency = audioContext.sampleRate / this.bufferSize;
+
     this.audioStream = stream;
     this.recorder = new Recorder(this.recordingTime);
 
     // create the media stream from the audio input source (microphone)
     this.sourceNode = audioContext.createMediaStreamSource(stream);
+    this.merger = audioContext.createChannelMerger(2);
+    this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 2, 1);
 
-    this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 1, 1);
+    //start highpass filter----------------------------------
+    // var filter = audioContext.createBiquadFilter();
+    // filter.type = filter.HIGHPASS;
+    // filter.frequency.value = 20;
+    // this.sourceNode.connect(filter);
+    // filter.connect(this.jsNode);
+    // //end highpass filter----------------------------------
+
+    this.sourceNode.connect(this.merger, 0, 0);
+    this.oscillatorNode.connect(this.merger, 0, 1);
+
+    this.merger.connect(this.jsNode);
+    this.jsNode.connect(audioContext.destination);
+    console.log('////audio nodes set up');
 
     console.log('____________starting analyzing mic audio_______ on:', platform.os.family);
     //platform/OS check to set threshold
@@ -58,7 +88,8 @@ var auProc = {
 
       that.worker.postMessage({
         command: 'processaudio',
-        frame: event.inputBuffer.getChannelData(0)
+        inputFrame: event.inputBuffer.getChannelData(0),
+        timeRefFrame: event.inputBuffer.getChannelData(1),
       });
 
       //recording------------------------------------------------
@@ -88,17 +119,6 @@ var auProc = {
           break;
       }
     };
-
-    //start highpass filter----------------------------------
-/*    var filter = audioContext.createBiquadFilter();
-    filter.type = filter.HIGHPASS;
-    filter.frequency.value = 20;
-    this.sourceNode.connect(filter);
-    filter.connect(this.jsNode);*/
-    //end highpass filter----------------------------------
-    this.sourceNode.connect(this.jsNode);
-    this.jsNode.connect(audioContext.destination);
-    console.log('////audio nodes set up');
 
   },
 
