@@ -115,7 +115,7 @@ function audioProcessing(inputFrame, timeRefFrame) {
     gapCount = deltaCount - bufferSize;
     gapTime = gapCount * timeIncr;
 
-    if (gapCount > 0) {
+    if (gapCount !== 0) {
 
       this.postMessage({
         type: 'through', //'sending_max_array',
