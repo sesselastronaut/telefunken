@@ -68,7 +68,20 @@ io.on('connection', function(socket) {
 				sentTimeReset();
 				break;
 		}
+		switch (type) {
+			case 'sendingGap':
+				getGapInfos(message.values);
+				break;
+		}
 	});
+
+	function getGapInfos(values) {
+		var maxTime = values.maxTime;
+		var id = values.myID;
+		var gapCount = values.gapCount;
+		var gapTime = values.gapTime;
+		console.log('////////' + id + ' - reports gap count: ' + gapCount);
+	}
 
 	function getMaximumTime(values) {
 		var maxTime = values.maxTime;
@@ -109,6 +122,7 @@ io.on('connection', function(socket) {
 				//	minKey = key;
 				// }
 			}
+			console.log('--------------------------------------');
 			console.log(maxKey + ' - time maxval: ' + telefunkerMaxValues[maxKey]);
 			for (key in telefunkerMaxValues) {
 				if (key !== maxKey) {

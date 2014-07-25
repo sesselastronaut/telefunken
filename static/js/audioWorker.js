@@ -115,6 +115,22 @@ function audioProcessing(inputFrame, timeRefFrame) {
     gapCount = deltaCount - bufferSize;
     gapTime = gapCount * timeIncr;
 
+    if (gapCount > 0) {
+
+      this.postMessage({
+        type: 'through', //'sending_max_array',
+        sub: {
+          type: 'sendingGap', //sendingMaxArray',
+          values: {
+            myID: id,
+            gapCount: gapCount, //maxSampleTimes.join('\n')
+            gapTime: gapTime
+          }
+        }
+      });
+
+    }
+
     //console.log("gapCount: " + gapCount);
 
     // if (gapCount !== 0) {
@@ -155,7 +171,8 @@ function audioProcessing(inputFrame, timeRefFrame) {
       // take first stimulus as a calibration for the time
       if (syncOnOnset === true) {
 
-        startRecording();
+        //uncomment this to start recording with sync onset
+        //startRecording();
 
         //console.log(maxSampleTime - syncTime);
         syncOnOnset = false;
