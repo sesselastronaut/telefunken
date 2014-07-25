@@ -16,6 +16,7 @@ function socketId(socket) {
     
     switch (type) {
       case 'reset':
+        console.log('>reset_received<');
         localStorage.clear();
         break;
 

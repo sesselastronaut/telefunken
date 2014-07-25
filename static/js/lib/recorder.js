@@ -1,5 +1,4 @@
-function Recorder(duration, numChannels) {
-  var sampleRate = audioContext.sampleRate;
+function Recorder(duration, numChannels, sampleRate) {
   var numFrames = duration * sampleRate;
 
   if (!numChannels)
@@ -32,16 +31,16 @@ Recorder.prototype.input = function(value) {
   return false;
 };
 
-Recorder.prototype.setupSave = function(filename) {
-  console.log('save');
-  var audioBlob = new Blob([this.view], {
+Recorder.prototype.setupSave = function() {
+  console.log('recorder returning blob');
+  return new Blob([this.view], {
     type: 'audio/wav'
   });
-  var url = (window.URL || window.webkitURL).createObjectURL(audioBlob);
-  var save = document.getElementById("save");
-  save.href = url;
-  save.disabled = false;
-  save.download = filename;
+  // var url = (window.URL || window.webkitURL).createObjectURL(audioBlob);
+  // var save = document.getElementById("save");
+  // save.href = url;
+  // save.disabled = false;
+  // save.download = filename;
   //console.log(audioBlob);
 };
 

@@ -53,7 +53,7 @@ function setConnectionStatus(status) {
 // }
 
 function microReady(stream) {
-	//display phone ID in UI
+	//display telefunker ID in UI
 	document.querySelector('h1 span').innerHTML = sockId.id;
 
 	auProc.id = sockId.id;
@@ -72,9 +72,15 @@ function init() {
 	//display ID on UI
 	document.querySelector('h1 > span').innerHTML = localStorage.getItem('myID');
 
+	//recording buttonis
 	document.querySelector('#record').addEventListener('click', function() {
 		auProc.startRecording();
 		this.disabled = true;
+	});
+
+	document.querySelector('#stopRec').addEventListener('click', function() {
+		auProc.stopRecording();
+		//this.disabled = true;
 	});
 
 	//clear buttoni

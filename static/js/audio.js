@@ -1,23 +1,19 @@
 var auProc = {
 
   id: null,
-  recording : false,
   buffer : null,
   bufferSize: 16384, //2048, // number of samples to collect before analyzing
 
-
-
   sampleThreshold: 0.189, //Linux = 0.32
-  sampleThresholdPhone: 0.7, //nexus 3 = 0.7 nexus 4 = 0.55
+  sampleThresholdPhone: 0.93, //nexus 3 = 0.7 nexus 4 = 0.55
 
-  recordingTime: 2,
 
   worker: new Worker("js/audioWorker.js"),
 
   //set threshold depending on OS
   setThreshold: function setThreshold(string) {
     var a = string.split(' ');
-    //console.log(a[0]);
+    console.log("a[0]: " + a[0]);
     if(a[0] === "Android") this.sampleThreshold = this.sampleThresholdPhone;
   },
 
@@ -35,6 +31,9 @@ var auProc = {
   init: function init(stream) {
     var that = this;
 
+    //platform/OS check to set threshold
+    this.setThreshold(platform.os.family);
+
     //console.log('posting init to worker');
     ////sending init to worker
     this.worker.postMessage({
@@ -47,44 +46,51 @@ var auProc = {
       }
     });
 
+    // create a sawtooth as a reference signal
+    this.audioBuffer = audioContext.createBuffer(1, audioContext.sampleRate, audioContext.sampleRate);
+    var buf = this.audioBuffer.getChannelData(0);
 
-    this.oscillatorNode = audioContext.createOscillator();
-    this.oscillatorNode.type = 1; //2;
-    this.oscillatorNode.frequency = audioContext.sampleRate / this.bufferSize;
+    for(var i = 0; i < buf.length; i ++)
+      buf[i] = i;
 
-    this.audioStream = stream;
-    this.recorder = new Recorder(this.recordingTime);
+    this.refSource = audioContext.createBufferSource();
+    this.refSource.buffer = this.audioBuffer;
+    this.refSource.loop = true;
+    this.refSource.start(0);
+
 
     // create the media stream from the audio input source (microphone)
-    this.sourceNode = audioContext.createMediaStreamSource(stream);
+    this.audioInput = audioContext.createMediaStreamSource(stream);
+    this.audioInputSplitter = audioContext.createChannelSplitter(2);
     this.merger = audioContext.createChannelMerger(2);
-    this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 2, 1);
+    this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 2, 2);
 
-    //start highpass filter----------------------------------
-    // var filter = audioContext.createBiquadFilter();
-    // filter.type = filter.HIGHPASS;
-    // filter.frequency.value = 20;
-    // this.sourceNode.connect(filter);
-    // filter.connect(this.jsNode);
-    // //end highpass filter----------------------------------
+    //highpass filter----------------------------------
+    //this.filter = audioContext.createBiquadFilter();
+    //this.filter.type = this.filter.HIGHPASS;
+    //this.filter.frequency.value = 20;
+    //this.filter.Q.value = 0;
 
-    this.sourceNode.connect(this.merger, 0, 0);
-    this.oscillatorNode.connect(this.merger, 0, 1);
+    this.audioInput.connect(this.audioInputSplitter);
+    this.audioInputSplitter.connect(this.merger, 0, 0);
+    //this.filter.connect(this.merger, 0, 0);
 
+    this.refSource.connect(this.merger, 0, 1);
     this.merger.connect(this.jsNode);
     this.jsNode.connect(audioContext.destination);
+
     console.log('////audio nodes set up');
 
     console.log('____________starting analyzing mic audio_______ on:', platform.os.family);
-    //platform/OS check to set threshold
-    this.setThreshold(platform.os.family);
-
-    console.log('sampleThreshold: ', this.sampleThreshold);
 
     // analyze audio from microphone
     // take first stimulus as a calibration for the time
     this.jsNode.onaudioprocess = function(event) {
-      //var frame = event.inputBuffer.getChannelData(0);
+      
+      //uncomment for stress test
+      // var sum = 0;
+      // for(var i = 0; i < 10000000; i++)
+      //   sum += Math.random();
 
       that.worker.postMessage({
         command: 'processaudio',
@@ -92,25 +98,25 @@ var auProc = {
         timeRefFrame: event.inputBuffer.getChannelData(1),
       });
 
-      //recording------------------------------------------------
-      if (that.recording) {
-        that.recording = that.recorder.input(frame[i]);
-
-        if (!that.recording) that.recorder.setupSave('output.wav');
-      }
-      //----------------------------------------------------------
-
     };
 
     this.worker.onmessage = function(event) {
       switch (event.data.type) {
-        case 'stopRecording':
+        case 'saveRecording':
+          //save recording
+          var audioBlob = event.data.values;
+          var url = (window.URL || window.webkitURL).createObjectURL(audioBlob);
+          var save = document.getElementById("save");
+          save.href = url;
+          save.disabled = false;
+          save.download = 'output.wav';
+          console.log(audioBlob);
+
           //stop recording----------------------------
-          that.recorder.setupSave('output.wav');
           that.jsNode.onaudioprocess = null;
-          if (that.audioStream) that.audioStream.stop();
-          if (that.sourceNode) that.sourceNode.disconnect();
-          document.querySelector('.status-holder').innerHTML = '--sending max array--';
+          // if (that.audioStream) that.audioStream.stop();
+          if (that.audioInput) that.audioInput.disconnect();
+          document.querySelector('.status-holder').innerHTML = '--stopped recording--';
           // console.log(event);
           break;
 
@@ -123,8 +129,17 @@ var auProc = {
   },
 
   startRecording: function startRecording(e) {
-    this.recording = true;
-    console.log('----this.recording state: ', this.recording);
+    //sent start recording to worker 
+    this.worker.postMessage({
+      command: 'startRecording',
+    });
+  },
+
+  stopRecording: function stopRecording(e) {
+    //sent stop recording to worker
+    this.worker.postMessage({
+      command: 'stopRecording',
+    });
   },
 
   play: function play() {

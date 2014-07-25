@@ -18,23 +18,24 @@ var fs = require('fs');
 // Socket based id handling module
 var sockId = require('./lib/socketId');
 
-function generateValues(n, k){
+function generateValues(n, k) {
 	var o = {};
-	k = k || 'phone';
-	for (var i = 0; i < n; i++) o[k+i] = false;
+	k = k || 'telefunker';
+	for (var i = 0; i < n; i++) o[k + (i + 1)] = false;
 	return o;
 }
 
-var phoneMaxValues = generateValues(sockId.maxClients);
-
+var telefunkerMaxValues = generateValues(sockId.maxClients);
 
 // app logic
 // ---------
 
 // page load /entry point
 app.get('/', function(req, res) {
-	
-	var vars = { title: '}----{}--{ritmo quattro stationi}--{}---{' };
+
+	var vars = {
+		title: '}----{}--{ritmo quattro stationi}--{}---{'
+	};
 
 	sockId.landingPage(vars); // extend the template vars for the landing page
 
@@ -73,40 +74,55 @@ io.on('connection', function(socket) {
 		var maxTime = values.maxTime;
 		var id = values.myID;
 		var count = values.count;
+		var sample = values.sample;
 		var filename = id + '-maxTime-' + count;
-		console.log('______received maximum from: ' + id + ' - value: ' + maxTime);
-		phoneMaxValues[id] = values.maxTime;
-		differenceCalculation ();
+		console.log(id + ' - samplevalue: ' + sample);
+		// console.log('______received maximum from: ' + id + ' - timevalue: ' + maxTime + ' - sample: ' + sample);
+		telefunkerMaxValues[id] = values.maxTime;
+		differenceCalculation();
 		//console.log('saving: ' + id + '-maxTime' + count);
 		//fs.writeFileSync(path.join('./data', filename), maxTime.toString());
-		//combine files into one file with: 'pr -tmJ phone1-event.csv phone2-event.csv > phones.csv'
+		//combine files into one file with: 'pr -tmJ telefunker1-event.csv telefunker2-event.csv > telefunkers.csv'
 	}
 
 	function differenceCalculation() {
 
-		var phonesMaxState = false;
-		for (var key in phoneMaxValues) {
-			if (phoneMaxValues[key] === false) return;
-			else phonesMaxState = true;
+		var telefunkersMaxState = false;
+		for (var key in telefunkerMaxValues) {
+			if (telefunkerMaxValues[key] === false) return;
+			else telefunkersMaxState = true;
 		}
 
-		if (phonesMaxState) {
+		if (telefunkersMaxState) {
 
 			var max = 0;
 			var maxKey = null;
-			for(key in phoneMaxValues){
-				if(phoneMaxValues[key] > max) {
-					max = phoneMaxValues[key];
+			var min = 9999;
+			var minKey = null;
+			for (key in telefunkerMaxValues) {
+				if (telefunkerMaxValues[key] > max) {
+					max = telefunkerMaxValues[key];
 					maxKey = key;
 				}
+				// if (telefunkerMaxValues[key] < min) {
+				//	min = telefunkerMaxValues[key];
+				//	minKey = key;
+				// }
 			}
+			console.log(maxKey + ' - time maxval: ' + telefunkerMaxValues[maxKey]);
+			for (key in telefunkerMaxValues) {
+				if (key !== maxKey) {
+					console.log(key + ' - time  value: ' + telefunkerMaxValues[key] + ' diff: ' + (max - telefunkerMaxValues[key]));
+					//console.log('max on: ' + maxKey + ' - ' + key + ' = ' + (max - telefunkerMaxValues[key]));
+				}
+			}
+			console.log('________________________________________________________________________');
+			//console.log('maxTime: ' + maxKey + ' - val: ' + max);
+			//console.log('minTime: ' + minKey + ' - val: ' + min + ' diff: ' + (telefunkerMaxValues[maxKey] - telefunkerMaxValues[minKey]));
 
-			console.log('----Maximum on: ' + maxKey + '- maximum value: ' + max);
-
-			//console.log('difference: ' + (phoneMaxValues.phone1 - phoneMaxValues.phone2));
 			//reset values
-			for (key in phoneMaxValues) {
-				phoneMaxValues[key] = null;
+			for (key in telefunkerMaxValues) {
+				telefunkerMaxValues[key] = false;
 			}
 		}
 	}
@@ -119,16 +135,16 @@ io.on('connection', function(socket) {
 		console.log('saving: ' + id + '-event' + ".csv");
 		console.log('received maximum: ' + samplearray);
 		fs.writeFileSync(path.join('./data', filename), samplearray.toString());
-		//combine files into one file with: 'pr -tmJ phone1-event.csv phone2-event.csv > phones.csv'
+		//combine files into one file with: 'pr -tmJ telefunker1-event.csv telefunker2-event.csv > telefunkers.csv'
 	}
 
 	//sent time reset received from one client to all clients
-	function sentTimeReset(){
+	function sentTimeReset() {
 		io.emit('message', {
 			type: 'timeReset'
 		});
 	}
-	
+
 });
 
 // server
