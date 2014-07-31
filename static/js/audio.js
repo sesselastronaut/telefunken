@@ -7,6 +7,9 @@ var auProc = {
   sampleThreshold: 0.189, //Linux = 0.32
   sampleThresholdPhone: 0.93, //nexus 3 = 0.7 nexus 4 = 0.55
 
+  rmsThreshold: 0.1,
+  rmsThresholdPhone: 0.5,
+
 
   worker: new Worker("js/audioWorker.js"),
 
@@ -14,7 +17,7 @@ var auProc = {
   setThreshold: function setThreshold(string) {
     var a = string.split(' ');
     console.log("a[0]: " + a[0]);
-    if(a[0] === "Android") this.sampleThreshold = this.sampleThresholdPhone;
+    if(a[0] === "Android") this.rmsThreshold = this.rmsThresholdPhone;
   },
 
   resetTimeSync: function(){
@@ -39,10 +42,11 @@ var auProc = {
     this.worker.postMessage({
       command: 'init',
       values: {
-        threshold: this.sampleThreshold,
+        rmsThreshold: this.rmsThreshold,
         bufferSize: this.bufferSize,
         id: this.id,
-        sampleRate: audioContext.sampleRate
+        sampleRate: audioContext.sampleRate,
+        timeGap: this.timeGap
       }
     });
 
@@ -65,15 +69,14 @@ var auProc = {
     this.merger = audioContext.createChannelMerger(2);
     this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 2, 2);
 
-    //highpass filter----------------------------------
-    //this.filter = audioContext.createBiquadFilter();
-    //this.filter.type = this.filter.HIGHPASS;
-    //this.filter.frequency.value = 20;
-    //this.filter.Q.value = 0;
-
+    // pass filter----------------------------------
+    this.filter = audioContext.createBiquadFilter();
+    this.filter.type = 0;
+    this.filter.frequency.value = 2000;
+   
     this.audioInput.connect(this.audioInputSplitter);
-    this.audioInputSplitter.connect(this.merger, 0, 0);
-    //this.filter.connect(this.merger, 0, 0);
+    this.audioInputSplitter.connect(this.filter, 0, 0);
+    this.filter.connect(this.merger, 0, 0);
 
     this.refSource.connect(this.merger, 0, 1);
     this.merger.connect(this.jsNode);
@@ -122,6 +125,10 @@ var auProc = {
 
         case 'through':
           socket.emit('message', event.data.sub);
+          break;
+          
+        case 'play':
+          that.play();
           break;
       }
     };

@@ -39,6 +39,10 @@ socket.on('message', function(message) {
 		case 'timeReset':
 			auProc.resetTimeSync();
 			break;
+		case 'setTimeGap':
+			//console.log('-----------timeGap: ' + message.data);
+			auProc.timeGap = message.data;
+			break;
 	}
 });
 

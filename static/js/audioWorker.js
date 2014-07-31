@@ -2,10 +2,6 @@ importScripts('lib/recorder.js');
 var playbackTime = 0;
 //var playbackCount = 0;
 
-var ringSamples = [];
-var ringIndex = 0;
-var ringSize = 3000;
-
 var syncTime = 0.0;
 var syncCount = 0;
 
@@ -23,16 +19,31 @@ var maxSampleTimesCounter = 0;
 var maxTimeOut = 0.13; //timeout after maximum is detected
 
 var lastOnsetTime = -999;
-
 var syncOnOnset = true;
+
+var lastSlowLogRms = 0;
+var slowRingSamples = [];
+var slowRingIndex = 0;
+slowRingSamples[880] = 0;
+
+var fastRingSamples = [];
+var fastRingIndex = 0;
+fastRingSamples[88] = 0;
 
 var recording = false;
 var recordingTime = 5;
 
-var threshold;
+var rmsLogCount = -1;
+var rmsValuesConcatenated = '';
+var numRecFrames = 60000;
+
+var micThreshold;
+var rmsThreshold;
 var bufferSize;
 var id;
 var sampleRate;
+var timeGap;
+
 var audiostream;
 
 
@@ -54,20 +65,17 @@ this.onmessage = function(e) {
     case 'stopRecording':
       stopRecording();
       break;
-
-    case 'blob':
-      console.log(___blub_____);
-      break;
   }
 };
 
 function init(data) {
-  threshold = data.values.threshold;
-  console.log("threshold set to: " + threshold);
+  rmsThreshold = data.values.rmsThreshold;
+  console.log("rms threshold set to: " + rmsThreshold);
   bufferSize = data.values.bufferSize;
   id = data.values.id;
   sampleRate = data.values.sampleRate;
-  //console.log(data.values.sampleRate);
+  timeGap = data.values.timeGap;
+  console.log('timegap set to: ' + data.values.timeGap);
 
   //instantiate the recorder
   recorder = new Recorder(recordingTime, 1, sampleRate);
@@ -95,15 +103,15 @@ function audioProcessing(inputFrame, timeRefFrame) {
   var gapTime = 0.0;
   var gapCount = 0;
   var refSample = timeRefFrame[0];
+  var maxRms = -999;
+
+
+  var rmsValues = [];
 
   this.audioStream = inputFrame;
   //var refSample = Math.floor(0.5 * sampleRate * (timeRefFrame[0] + 1) + 0.5);
 
-  //console.log('inputFrame ' + inputFrame[0]);
-  //console.log('timeRefFrame ' + timeRefFrame[0]);
-  //console.log("__________");
-  //console.log("refSample: " + refSample);
-
+  //analysis of reference signal to check for gaps
   if (lastRefSample > 0) {
     var deltaCount = refSample - lastRefSample;
 
@@ -128,28 +136,109 @@ function audioProcessing(inputFrame, timeRefFrame) {
           }
         }
       });
-
     }
 
-    //console.log("gapCount: " + gapCount);
-
-    // if (gapCount !== 0) {
-    //   console.log("_____________");
-    //   console.log("refSample: " + refSample);
-    //   console.log("lastRefSample: " + lastRefSample);
-    //   console.log("deltaCount: " + deltaCount);
-    //   console.log("gapCount: " + gapCount);
-    // }
   }
-
   // comment this to disable time correction
   lastRefSample = refSample;
 
   time += gapTime;
 
+
+
   //audio analysis of microphone input on channel 0                         
   for (var i = 0; i < inputFrame.length; i++) {
-    var sample = Math.abs(inputFrame[i]);
+    var sample = inputFrame[i];
+    var sqsample = sample * sample;
+    var sampleLogRms = 0.5 * Math.log(sqsample);
+    var j;
+
+    //Sync and OnSet Detector------------------------------------------
+    // calculate slow RMS
+    slowRingSamples[slowRingIndex] = sqsample;
+    slowRingIndex = (slowRingIndex + 1) % slowRingSamples.length;
+
+    var slowSum = 0;
+
+    for (j = 0; j < slowRingSamples.length; j++)
+      slowSum += slowRingSamples[j];
+
+    //console.log('meanSquare: '+ meanSquare);
+
+    var slowLogRms = 0.5 * Math.log(slowSum / slowRingSamples.length + 0.000001);
+
+    // calculate fast RMS
+    fastRingSamples[fastRingIndex] = sqsample;
+    fastRingIndex = (fastRingIndex + 1) % fastRingSamples.length;
+
+    var fastSum = 0;
+
+    for (j = 0; j < fastRingSamples.length; j++)
+      fastSum += fastRingSamples[j];
+
+    var fastLogRms = 0.5 * Math.log(fastSum / fastRingSamples.length + 0.000001);
+
+    //log rms/lastRMS values:
+    if (rmsLogCount >=0 && rmsLogCount < numRecFrames) {
+      rmsValuesConcatenated += (slowLogRms + ',' + sample + ',' + (fastLogRms - lastSlowLogRms) + '\n');
+      rmsLogCount++;
+    }
+    //console.log('rmsValues[i]: ' + rmsValues);
+
+    // console.log('_____________');
+    // console.log('lastSlowLogRms: ' + lastSlowLogRms);
+    // console.log('____rms: ' + slowLogRms);
+    // console.log('rms - lastRms: ' + (slowLogRms - lastSlowLogRms));
+
+    // console.log('_time-local: ' + time);
+    // console.log('time-synced: ' + (time - syncTime));
+    if (fastLogRms - lastSlowLogRms >= 0.6 && time - lastOnsetTime > timeGap) {
+    
+      //sychronize time on first maximum
+      if (syncOnOnset === true) {
+        console.log('-------time synced--------');
+        syncOnOnset = false;
+        syncTime = time;
+        rmsLogCount = 0;
+        rmsValuesConcatenated = '';
+
+        this.postMessage({
+          type: 'through',
+          sub: {
+            type: 'sendingOnsetTime',
+            values: {
+              myID: id,
+              onsetTime: (time - syncTime),
+              sample: sample
+              //count: maxSampleTimesCounter
+            }
+          }
+        });
+
+        // this.postMessage({
+        //   type: 'play',
+        // });
+
+      } else {
+
+        this.postMessage({
+          type: 'through',
+          sub: {
+            type: 'sendingOnsetTime',
+            values: {
+              myID: id,
+              onsetTime: (time - syncTime),
+              sample: sample
+              //count: maxSampleTimesCounter
+            }
+          }
+        });
+      }
+
+      lastOnsetTime = time;
+    }
+
+    lastSlowLogRms = slowLogRms;
 
     //recording------------------------------------------------
     if (this.recording) {
@@ -158,93 +247,44 @@ function audioProcessing(inputFrame, timeRefFrame) {
       if (!this.recording) stopRecording();
     }
 
-    //start maxdetection----------------------------------------------      
-    if (time > (maxSampleTime + maxTimeOut) && maxSampleTime > lastOnsetTime) {
-
-      // console.log('_______sample: ' + sample);
-      // console.log('____maxSample: ' + maxSample);
-      // console.log('maxSampleTime: ' + maxSampleTime);
-      // console.log('___maxTimeOut: ' + maxTimeOut);
-      // console.log('_________time: ' + time);
-      // console.log('lastOnsetTime: ' + lastOnsetTime);
-
-      // take first stimulus as a calibration for the time
-      if (syncOnOnset === true) {
-
-        //uncomment this to start recording with sync onset
-        //startRecording();
-
-        //console.log(maxSampleTime - syncTime);
-        syncOnOnset = false;
-        syncTime = maxSampleTime;
-        //syncCount = maxSampleCount;
-        maxSampleTimesCounter = 0;
-
-        this.postMessage({
-          type: 'through', //'sending_max_array',
-          sub: {
-            type: 'sendingMaximumTime', //sendingMaxArray',
-            values: {
-              myID: id,
-              maxTime: (maxSampleTime - syncTime), //maxSampleTimes.join('\n')
-              sample: maxSample
-              //count: maxSampleTimesCounter
-            }
+    //report clipping
+    if (sample > 0.98) {
+      this.postMessage({
+        type: 'through', //'sending_max_array',
+        sub: {
+          type: 'sendClipping', //sendingMaxArray',
+          values: {
+            myID: id,
+            clipTime: (time - syncTime),
+            clipSample: sample
           }
-        });
-
-
-      } else {
-        //console.log('---stopping---');
-        maxSampleTimesCounter++;
-
-        //console.log("maxSample: " + maxSample);
-
-        this.postMessage({
-          type: 'through', //'sending_max_array',
-          sub: {
-            type: 'sendingMaximumTime', //sendingMaxArray',
-            values: {
-              myID: id,
-              maxTime: (maxSampleTime - syncTime), //maxSampleTimes.join('\n')
-              sample: maxSample
-              //count: maxSampleTimesCounter
-            }
-          }
-        });
-
-        //this.postMessage ( {type: 'stopRecording'});
-
-      }
-
-      lastOnsetTime = maxSampleTime;
+        }
+      });
     }
-
-    //find maximum in signal but first apply threshold on signal to filter noise
-    if (sample > threshold) {
-
-
-      if (time > (maxSampleTime + maxTimeOut) || sample > maxSample) {
-
-        maxSample = sample;
-        maxSampleTime = time;
-        //maxSampleCount = count;
-
-      }
-    }
-
-    //ringIndex = (ringIndex + 1) % ringSize;
-    lastLastSample = lastSample;
-    lastSample = sample;
-
-    //end maxdetection----------------------------------------------
 
     time += timeIncr;
-    //count++;
-
   }
+  
+  ////send files to 
+  // if(rmsLogCount === numRecFrames) {
+  //   rmsLogCount = -1;
 
-  //playbackCount += bufferSize;
+  //   console.log('###sendingRmsValues to server#####' + rmsLogCount);
+  //   //console.log(rmsValuesConcatenated);
+  //   this.postMessage({
+  //     type: 'through',
+  //     sub: {
+  //       type: 'sendingRmsValues',
+  //       values: {
+  //         myID: id,
+  //         rmsValues: rmsValuesConcatenated,
+  //         //rmscounter: rmsLogCount
+  //       }
+  //     }
+  //   });
+  // }
+
+   //playbackCount += bufferSize;
   playbackTime += bufferSize / sampleRate;
 
 }
