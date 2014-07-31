@@ -69,14 +69,15 @@ var auProc = {
     this.merger = audioContext.createChannelMerger(2);
     this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 2, 2);
 
-    // pass filter----------------------------------
-    this.filter = audioContext.createBiquadFilter();
-    this.filter.type = 0;
-    this.filter.frequency.value = 2000;
-   
+    //highpass filter----------------------------------
+    //this.filter = audioContext.createBiquadFilter();
+    //this.filter.type = this.filter.HIGHPASS;
+    //this.filter.frequency.value = 20;
+    //this.filter.Q.value = 0;
+
     this.audioInput.connect(this.audioInputSplitter);
-    this.audioInputSplitter.connect(this.filter, 0, 0);
-    this.filter.connect(this.merger, 0, 0);
+    this.audioInputSplitter.connect(this.merger, 0, 0);
+    //this.filter.connect(this.merger, 0, 0);
 
     this.refSource.connect(this.merger, 0, 1);
     this.merger.connect(this.jsNode);
