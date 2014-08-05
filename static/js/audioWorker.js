@@ -219,104 +219,104 @@ function audioProcessing(inputFrame, timeRefFrame) {
 
     lastSlowLogRms = slowLogRms;
 
-    // // --- record onset samples ---------------------------------------------
-    // if(postOnsetSampleCount < 0) {
-    //   // record pre-onset samples in ringbuffer
-    //   preOnsetRingBuffer[preOnsetRingIndex] = sample;
-    //   preOnsetRingIndex = (preOnsetRingIndex + 1) % preOnsetRingBuffer.length;
-    // } else if(postOnsetSampleCount < numPostOnsetSamples) {
-    //   // record post-onset samples
-    //   postOnsetSamples[postOnsetSampleCount] = sample;
-    //   postOnsetSampleCount++;
-    // }
+    // --- record onset samples ---------------------------------------------
+    if(postOnsetSampleCount < 0) {
+      // record pre-onset samples in ringbuffer
+      preOnsetRingBuffer[preOnsetRingIndex] = sample;
+      preOnsetRingIndex = (preOnsetRingIndex + 1) % preOnsetRingBuffer.length;
+    } else if(postOnsetSampleCount < numPostOnsetSamples) {
+      // record post-onset samples
+      postOnsetSamples[postOnsetSampleCount] = sample;
+      postOnsetSampleCount++;
+    }
 
-    // if (postOnsetSampleCount === numPostOnsetSamples) {
-    //   // join pre-onset samples from ringuffer and post-onset sample 
-    //   var sendBuffer = preOnsetRingBuffer.slice(preOnsetRingIndex, preOnsetRingSize);
+    if (postOnsetSampleCount === numPostOnsetSamples) {
+      // join pre-onset samples from ringuffer and post-onset sample 
+      var sendBuffer = preOnsetRingBuffer.slice(preOnsetRingIndex, preOnsetRingSize);
 
-    //   if(preOnsetRingIndex > 0) {
-    //     sendBuffer = sendBuffer.concat(preOnsetRingBuffer.slice(0, preOnsetRingIndex));
-    //   }
+      if(preOnsetRingIndex > 0) {
+        sendBuffer = sendBuffer.concat(preOnsetRingBuffer.slice(0, preOnsetRingIndex));
+      }
 
-    //   sendBuffer = sendBuffer.concat(postOnsetSamples);
+      sendBuffer = sendBuffer.concat(postOnsetSamples);
 
-    //   // send array of onset samples to server
-    //   this.postMessage({
-    //     type: 'through',
-    //     sub: {
-    //       type: 'sendingOnsetSamples',
-    //       values: {
-    //         myID: id,
-    //         onsetSamples: sendBuffer,
-    //         onsetTime: serverOnsetTime,
-    //         sampleRate: sampleRate
-    //       }
-    //     }
-    //   });
+      // send array of onset samples to server
+      this.postMessage({
+        type: 'through',
+        sub: {
+          type: 'sendingOnsetSamples',
+          values: {
+            myID: id,
+            onsetSamples: sendBuffer,
+            onsetTime: serverOnsetTime,
+            sampleRate: sampleRate
+          }
+        }
+      });
 
-    //   postOnsetSampleCount = -1;
-    // }
+      postOnsetSampleCount = -1;
+    }
 
-    // // --- record criteria ----------------------------------- 
-    // if(triggerRecCriteria) {
-    //   recCriteriaString = '';
-    //   recCriteriaCount = 0;
-    //   triggerRecCriteria = false;
-    // }
+    // --- record criteria ----------------------------------- 
+    if(triggerRecCriteria) {
+      recCriteriaString = '';
+      recCriteriaCount = 0;
+      triggerRecCriteria = false;
+    }
 
-    // // concat criteria
-    // if(recCriteriaCount >= 0) {
-    //   recCriteriaString += (sample + ',' + (fastLogRms - lastSlowLogRms) + '\n');
-    //   recCriteriaCount++;
-    // }
+    // concat criteria
+    if(recCriteriaCount >= 0) {
+      recCriteriaString += (sample + ',' + (fastLogRms - lastSlowLogRms) + '\n');
+      recCriteriaCount++;
+    }
 
-    // // send criteria
-    // if (recCriteriaCount === numRecCriteria) {
-    //   console.log('###sending criteria to server#####' + recCriteriaCount);
-    //   this.postMessage({
-    //     type: 'through',
-    //     sub: {
-    //       type: 'sendingCriteriaString',
-    //       values: {
-    //         myID: id,
-    //         criteriaString: recCriteriaString,
-    //       }
-    //     }
-    //   });
+    // send criteria
+    if (recCriteriaCount === numRecCriteria) {
+      console.log('###sending criteria to server#####' + recCriteriaCount);
+      this.postMessage({
+        type: 'through',
+        sub: {
+          type: 'sendingCriteriaString',
+          values: {
+            myID: id,
+            criteriaString: recCriteriaString,
+          }
+        }
+      });
 
-    //   recCriteriaCount = -1;
-    // }
+      recCriteriaCount = -1;
+    }
 
-    // // wav recording
-    // if (this.recording) {
-    //   this.recording = this.recorder.input(inputFrame[i]);
+    // wav recording
+    if (this.recording) {
+      this.recording = this.recorder.input(inputFrame[i]);
 
-    //   if (!this.recording) stopRecording();
-    // }
+      if (!this.recording) stopRecording();
+    }
 
-    // // count clipping
-    // if (Math.abs(sample) > 0.98) {
-    //   numClippedSamples++;
-    // }
+    // count clipping
+    if (Math.abs(sample) > 0.98) {
+      numClippedSamples++;
+    }
 
     time += timeIncr;
   }
   //end channel 0 =========================================================================
 
-  // // report clipping
-  // if (numClippedSamples > 0) {
-  //   this.postMessage({
-  //     type: 'through',
-  //     sub: {
-  //       type: 'sendClipping',
-  //       values: {
-  //         myID: id,
-  //         frameTime: playbackTime,
-  //         numClipping: numClippedSamples
-  //       }
-  //     }
-  //   });
-  // }
+  // report clipping
+  if (numClippedSamples > 0) {
+    this.postMessage({
+      type: 'through',
+      sub: {
+        type: 'sendClipping',
+        values: {
+          myID: id,
+          frameTime: playbackTime,
+          numClipping: numClippedSamples
+        }
+      }
+    });
+  }
 
   playbackTime += bufferSize / sampleRate;
 }

@@ -100,7 +100,7 @@ io.on('connection', function(socket) {
 		}
 		switch (type) {
 			case 'sendingOnsetSamples':
-				//receiveOnsetSamples(message.values);
+				receiveOnsetSamples(message.values);
 				break;
 		}
 
