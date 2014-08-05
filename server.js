@@ -22,12 +22,14 @@ var rmscounter = 0;
 
 function generateValues(n, k) {
 	var o = {};
-	k = k || 'telefunker';
-	for (var i = 0; i < n; i++) o[k + (i + 1)] = false;
+	// k = k || 'telefunker';
+	// for (var i = 0; i < n; i++) o[k + (i + 1)] = false;
+	for (var i = 0; i < n; i++) o[(i + 1)] = false;
 	return o;
 }
 
-var telefunkerOnsetValues = generateValues(sockId.maxClients);
+var telefunkerOnsetTimes = generateValues(sockId.maxClients);
+var telefunkerBuffers = generateValues(sockId.maxClients);
 var lastOnsetTime = -1;
 var numReceivedTelefunkers = 0;
 
@@ -77,7 +79,7 @@ io.on('connection', function(socket) {
 		switch (type) {
 			case 'resetTime':
 				lastOnsetTime = 0;
-				console.log('##################reset received: ' + lastOnsetTime);
+				console.log('##################reset received: ');
 				sentTimeReset();
 				break;
 		}
@@ -92,56 +94,42 @@ io.on('connection', function(socket) {
 				break;
 		}
 		switch (type) {
-			case 'sendingRmsValues':
-				saveRmsValues(message.values);
+			case 'sendingCriteriaString':
+				saveCriteriaString(message.values);
 				break;
 		}
 		switch (type) {
-			case 'sendingRmsValues':
-				saveRmsValues(message.values);
+			case 'sendingOnsetSamples':
+				//receiveOnsetSamples(message.values);
 				break;
 		}
 
 
 	});
 
-	function reportClipping(values) {
-		var id = values.myID;
-		var clipSample = values.clipSample;
-		var clipTime = values.clipTime;
-		console.log('////////' + id + ' - reports clipping on time: ' + clipTime + ' sample: ' + clipSample);
-	}
-
-	function reportGapInfos(values) {
-		var id = values.myID;
-		var gapCount = values.gapCount;
-		var gapTime = values.gapTime;
-		console.log('////////' + id + ' - reports gap count: ' + gapCount);
-	}
 
 	function getOnsetTime(values) {
 		var onsetTime = values.onsetTime;
-		var id = values.myID;
+		var idx = values.myID - 1;
 		var count = values.count;
 		var sample = values.sample;
-		var filename = id + '-onsetTime-' + count;
-
+		var filename = values.myID + '-onsetTime-' + count;
 
 		//console.log(id + ' - samplevalue: ' + sample);
 		console.log('--------------------------------------');
 		//console.log('>>lastOnsetTime: ' + lastOnsetTime);
-		console.log('>>onset from: ' + id + ' - timevalue: ' + onsetTime + ' - sample: ' + sample);
+		console.log('>>onset from: ' + values.myID + ' - timevalue: ' + onsetTime + ' - sample: ' + sample);
 		//console.log('>>lastOnsetTime - onsetTime: ' + (onsetTime - lastOnsetTime));
+
+		return;
 		
 		if (onsetTime - lastOnsetTime > timeGap) {
-			console.log('###numReceivedTelefunkers: '+ numReceivedTelefunkers);
+			//console.log('###numReceivedTelefunkers: '+ numReceivedTelefunkers);
 			numReceivedTelefunkers = 0;
 		}
 
-		telefunkerOnsetValues[id] = onsetTime;
+		telefunkerOnsetTimes[idx] = onsetTime;
 		numReceivedTelefunkers++;
-
-		//console.log('<<onset from: ' + id + ' - timevalue: ' + onsetTime + ' - sample: ' + sample);
 
 		if(numReceivedTelefunkers >= sockId.maxClients) {
 			differenceCalculation();
@@ -153,54 +141,140 @@ io.on('connection', function(socket) {
 		//console.log('<<lastOnsetTime: ' + lastOnsetTime + ' from: '+ id);
 	}
 
+	function receiveOnsetSamples (values){
+		var idx = values.myID - 1;
+		var onsetSamples = values.onsetSamples;
+		var onsetTime = values.onsetTime;
+		var sampleRate = values.sampleRate;
+		var i, j;
+
+		console.log('receiving rec samples at ' + lastOnsetTime + ' for index '+ idx);
+
+		if (onsetTime - lastOnsetTime > timeGap) {
+			// reset receiver
+			numReceivedTelefunkers = 0;
+
+			for(i = 0; i < sockId.maxClients; i++)
+				telefunkerOnsetTimes[i] = -1;
+		}
+
+		if(telefunkerOnsetTimes[idx] === -1)
+			numReceivedTelefunkers++;
+
+		telefunkerBuffers[idx] = onsetSamples;
+		telefunkerOnsetTimes[idx] = onsetTime;
+
+		// var saveStr = onsetSamples.join(',\n') + ',\n';
+		// var filename = values.myID + '-onset-samples' + ".txt";
+		// console.log('###saving: ' + filename);
+		// fs.writeFile(path.join('./data', filename), saveStr, function(err) {
+		//	if (err) throw err;
+		//	console.log('Onset samples saved!');
+		// });
+
+		if(numReceivedTelefunkers === sockId.maxClients) {
+
+			console.log('__________________________');
+			telefunkerBuffers[idx] = onsetSamples;
+
+			var bufferSize = telefunkerBuffers[0].length;
+			var corrSpace = bufferSize / 4;
+			var corrDiffTimes = [];
+		
+			for(i = 0; i < sockId.maxClients; i++) {
+				corrDiffTimes[i] = [];
+
+				for(j = 0; j < sockId.maxClients; j++) {
+					var crossCorr = crossCorrelation(telefunkerBuffers[i], telefunkerBuffers[j].slice(corrSpace, bufferSize - corrSpace));
+					var maxIndex = getMaximumIndex(crossCorr) - corrSpace;
+					var diffSamples = (telefunkerOnsetTimes[i] - telefunkerOnsetTimes[j]) * sampleRate;
+
+					corrDiffTimes[i][j] = maxIndex;
+
+					//console.log('####crossCorr[' + i + '][ ' + j + ']');
+					//var printStr = crossCorr.join(',\n') + ',\n';
+					//console.log(printStr);
+					console.log('delta time (samples): onset: ' + diffSamples + ', cross corr: ' + maxIndex);
+				}
+			}
+
+			// reset receiver
+			numReceivedTelefunkers = 0;
+			for(i = 0; i < sockId.maxClients; i++)
+				telefunkerOnsetTimes[i] = -1;
+		}
+
+		//checkOnsetTimeDiff();
+		lastOnsetTime = onsetTime;
+	}
+
+	function getMaximumIndex (array){
+		var max = array[0];
+		var maxIndex = 0;
+
+		for (var i = 1; i < array.length; i++) {
+			if (array[i] > max) {
+				max = array[i];
+				maxIndex = i;
+			}
+		}
+
+		return maxIndex;
+	}
+
+
+	function crossCorrelation(buffer, window) {
+		var crossCorrSize = buffer.length - window.length;
+		var crossCorr = [];
+
+		for (var j = 0; j < crossCorrSize; j++) {
+			var sum = 0;
+	
+			for (var i = 0; i < window.length; i++) {
+				sum += buffer[i + j] * window[i];
+			}
+
+			crossCorr[j] = sum;
+		}
+
+		return crossCorr;
+	}
+
 	function differenceCalculation() {
 			//check for minimum
 			var min = 9999;
 			var minKey = null;
-			for (var key in telefunkerOnsetValues) {
-				if (telefunkerOnsetValues[key] < min) {
-					min = telefunkerOnsetValues[key];
+			for (var key in telefunkerOnsetTimes) {
+				if (telefunkerOnsetTimes[key] < min) {
+					min = telefunkerOnsetTimes[key];
 					minKey = key;
 				}
 			}
 			console.log('--------------------------------------');
-			console.log(minKey + ' - time minval: ' + telefunkerOnsetValues[minKey]);
-			for (key in telefunkerOnsetValues) {
+			console.log(minKey + ' - time minval: ' + telefunkerOnsetTimes[minKey]);
+			for (key in telefunkerOnsetTimes) {
 				if (key !== minKey) {
-					console.log(key + ' - time  value: ' + telefunkerOnsetValues[key] + ' diff: ' + (telefunkerOnsetValues[key] - min) + ' = samples: ' + ((telefunkerOnsetValues[key] - min) * 44100));
-					//console.log('max on: ' + maxKey + ' - ' + key + ' = ' + (max - telefunkerOnsetValues[key]));
+					console.log(key + ' - time  value: ' + telefunkerOnsetTimes[key] + ' diff: ' + (telefunkerOnsetTimes[key] - min) + ' = samples: ' + ((telefunkerOnsetTimes[key] - min) * 44100));
+					//console.log('max on: ' + maxKey + ' - ' + key + ' = ' + (max - telefunkerOnsetTimes[key]));
 				}
 			}
 			console.log('________________________________________________________________________');
 	}
 	
-	function checkOnsetTimeDiff() {
-		var max = 0;
-		var maxKey = null;
 
-		//find maximum
-		for (var key in telefunkerOnsetValues) {
-			if (telefunkerOnsetValues[key] > max) {
-				max = telefunkerOnsetValues[key];
-				maxKey = key;
-			}
-		}
-		// console.log('------------------------------------');
-		// console.log('maxKey: ' + maxKey);
-
-		//check time difference between the values if smaller than threshold do difference calculation
-		for (key in telefunkerOnsetValues) {
-
-			if (key !== maxKey && (Math.abs(telefunkerOnsetValues[maxKey] - telefunkerOnsetValues[key]) < 0.080)) {
-					// for (key in telefunkerOnsetValues) {
-					//	console.log('---diffcalc with: ' + key + ' diff from max: ' + (telefunkerOnsetValues[maxKey] - telefunkerOnsetValues[key]));
-					// }
-					//do the difference calculation
-					differenceCalculation ();
-			}
-		}
+	function reportClipping(values) {
+		var id = values.myID;
+		var frameTime = values.frameTime;
+		var numClipping = values.numClipping;
+		console.log('////////' + id + ' - reports ' + numClipping + ' clippings at frame time: ' + frameTime);
 	}
 
+	function reportGapInfos(values) {
+		var id = values.myID;
+		var gapCount = values.gapCount;
+		var gapTime = values.gapTime;
+		console.log('////////' + id + ' - reports gap count: ' + gapCount);
+	}
 
 	function saveMaxarraysamples(values) {
 		var samplearray = values.samplearray;
@@ -212,16 +286,14 @@ io.on('connection', function(socket) {
 		//combine files into one file with: 'pr -tmJ telefunker1-event.csv telefunker2-event.csv > telefunkers.csv'
 	}
 
-	function saveRmsValues(values) {
-		var rmsarray = values.rmsValues;
+	function saveCriteriaString(values) {
 		var id = values.myID;
-		//var rmscounter = values.rmscounter;
+		var string = values.criteriaString;
 		var filename = id + '-event' + ".csv";
 		console.log('###saving: ' + filename);
-		// console.log('###received RMS Values: ' + rmsarray);
-		fs.writeFile(path.join('./data', filename), rmsarray.toString(), function(err) {
+		fs.writeFile(path.join('./data', filename), string, function(err) { //.toString()????
 			if (err) throw err;
-			console.log('It\'s saved!');
+			console.log('CriteriaString saved!');
 		});
 		//combine files into one file with: 'pr -tmJ telefunker1-event.csv telefunker2-event.csv > telefunkers.csv'
 	}

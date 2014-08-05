@@ -41,7 +41,7 @@ socket.on('message', function(message) {
 			break;
 		case 'setTimeGap':
 			//console.log('-----------timeGap: ' + message.data);
-			auProc.timeGap = message.data;
+			auProc.minInterOnsetTime = message.data;
 			break;
 	}
 });
@@ -87,6 +87,10 @@ function init() {
 		//this.disabled = true;
 	});
 
+	document.querySelector('#recordCriteria').addEventListener('click', function() {
+		auProc.startCriteriaRec();
+	});
+
 	//clear buttoni
 	document.querySelector(".clear_button").addEventListener('click', function() {
 		////////emitting to server
@@ -95,6 +99,7 @@ function init() {
 			data: sockId.id
 		});
 	});
+
 
 	//reset buttoni
 	document.querySelector(".reset_button").addEventListener('click', function() {

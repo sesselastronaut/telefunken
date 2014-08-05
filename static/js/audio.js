@@ -7,8 +7,9 @@ var auProc = {
   sampleThreshold: 0.189, //Linux = 0.32
   sampleThresholdPhone: 0.93, //nexus 3 = 0.7 nexus 4 = 0.55
 
-  rmsThreshold: 0.1,
-  rmsThresholdPhone: 0.5,
+  onsetThreshold: 0.0,
+  onsetThresholdOnAndroidPhone: 0.8,
+  onstThresholdByDefault: 0.8,
 
 
   worker: new Worker("js/audioWorker.js"),
@@ -17,7 +18,11 @@ var auProc = {
   setThreshold: function setThreshold(string) {
     var a = string.split(' ');
     console.log("a[0]: " + a[0]);
-    if(a[0] === "Android") this.rmsThreshold = this.rmsThresholdPhone;
+
+    if(a[0] === "Android")
+      this.onsetThreshold = this.onsetThresholdOnAndroidPhone;
+    else
+      this.onsetThreshold = this.onstThresholdByDefault;
   },
 
   resetTimeSync: function(){
@@ -42,11 +47,11 @@ var auProc = {
     this.worker.postMessage({
       command: 'init',
       values: {
-        rmsThreshold: this.rmsThreshold,
-        bufferSize: this.bufferSize,
         id: this.id,
+        onsetThreshold: this.onsetThreshold,
+        bufferSize: this.bufferSize,
         sampleRate: audioContext.sampleRate,
-        timeGap: this.timeGap
+        minInterOnsetTime: this.minInterOnsetTime
       }
     });
 
@@ -69,15 +74,15 @@ var auProc = {
     this.merger = audioContext.createChannelMerger(2);
     this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 2, 2);
 
-    //highpass filter----------------------------------
-    //this.filter = audioContext.createBiquadFilter();
-    //this.filter.type = this.filter.HIGHPASS;
-    //this.filter.frequency.value = 20;
-    //this.filter.Q.value = 0;
+    //filter----------------------------------
+    this.filter = audioContext.createBiquadFilter();
+    this.filter.type = this.filter.LOWPASS;
+    this.filter.frequency.value = 10000;
+    this.filter.Q.value = 0;
 
     this.audioInput.connect(this.audioInputSplitter);
-    this.audioInputSplitter.connect(this.merger, 0, 0);
-    //this.filter.connect(this.merger, 0, 0);
+    this.audioInputSplitter.connect(this.filter, 0, 0);
+    this.filter.connect(this.merger, 0, 0);
 
     this.refSource.connect(this.merger, 0, 1);
     this.merger.connect(this.jsNode);
@@ -90,12 +95,6 @@ var auProc = {
     // analyze audio from microphone
     // take first stimulus as a calibration for the time
     this.jsNode.onaudioprocess = function(event) {
-      
-      //uncomment for stress test
-      // var sum = 0;
-      // for(var i = 0; i < 10000000; i++)
-      //   sum += Math.random();
-
       that.worker.postMessage({
         command: 'processaudio',
         inputFrame: event.inputBuffer.getChannelData(0),
@@ -147,6 +146,13 @@ var auProc = {
     //sent stop recording to worker
     this.worker.postMessage({
       command: 'stopRecording',
+    });
+  },
+
+  startCriteriaRec: function startCriteriaRec(e) {
+    //sent start startCriteriaRec to worker 
+    this.worker.postMessage({
+      command: 'startCriteriaRec',
     });
   },
 

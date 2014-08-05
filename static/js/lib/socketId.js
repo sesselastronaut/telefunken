@@ -9,7 +9,7 @@ function socketId(socket) {
     return;
   }
 
-  this.id = null;
+  this.id = -1;
 
   socket.on('message', function(message) {
     var type = message.type;
@@ -27,15 +27,17 @@ function socketId(socket) {
     }
   });
 
-
-
   //if localStorage cookie/ID is not set 
-  this.id = localStorage.getItem('myID');
+  var idStr = localStorage.getItem('myID');
 
   //start ID-check---------------------------------
-  if (!this.id) {
+  if (idStr) {
+    this.id = Number.parseInt(idStr);
+  } else {
     localStorage.setItem('myID', serverID);
-    this.id = localStorage.getItem('myID');
+    idStr = localStorage.getItem('myID');
+
+    this.id = Number.parseInt(idStr);
 
     ////////emitting to server
     socket.emit('message', {
@@ -46,7 +48,6 @@ function socketId(socket) {
       }
     });
   }
-
 }
 
 socketId.prototype.micReady = function() {

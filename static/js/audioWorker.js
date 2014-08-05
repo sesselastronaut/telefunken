@@ -2,24 +2,15 @@ importScripts('lib/recorder.js');
 var playbackTime = 0;
 //var playbackCount = 0;
 
-var syncTime = 0.0;
-var syncCount = 0;
-
-var lastSample = 0;
-var lastLastSample = 0;
-
-var lastRefSample = 0;
-var lastEdge = -1;
-
-var maxSample = -999;
-var maxSampleTime = 99999999999;
-var maxSampleCount = 0;
-var maxSampleTimes = [];
-var maxSampleTimesCounter = 0;
-var maxTimeOut = 0.13; //timeout after maximum is detected
-
-var lastOnsetTime = -999;
+var syncTime = 0.0; //to be removed!!!
+var serverOnsetTime = 0;
 var syncOnOnset = true;
+
+
+var lastRefSample = 0; //used for gap detection
+
+// onset detector 
+var lastOnsetTime = -999;
 
 var lastSlowLogRms = 0;
 var slowRingSamples = [];
@@ -30,23 +21,38 @@ var fastRingSamples = [];
 var fastRingIndex = 0;
 fastRingSamples[88] = 0;
 
+// onset recorder (for correlation on server)
+var numOnsetSamples = 300;
+
+var preOnsetRingBuffer = [];
+var preOnsetRingIndex = 0;
+var preOnsetRingSize = numOnsetSamples / 4;
+preOnsetRingBuffer[preOnsetRingSize - 1] = 0;
+
+var numPostOnsetSamples = numOnsetSamples - preOnsetRingSize;
+var postOnsetSampleCount = -1;
+var postOnsetSamples = [];
+postOnsetSamples[numPostOnsetSamples - 1] = 0;
+
+// wav file recorder
+var recCount = -1;
 var recording = false;
 var recordingTime = 5;
 
-var rmsLogCount = -1;
-var rmsValuesConcatenated = '';
-var numRecFrames = 60000;
+// onset criteria (string) recorder
+var triggerRecCriteria = false;
+var recCriteriaString = '';
+var recCriteriaCount = -1;
+var numRecCriteria = 88200;
 
-var micThreshold;
-var rmsThreshold;
-var bufferSize;
+// common client parameters
 var id;
+var onsetThreshold;
+var minInterOnsetTime; //inter onset time gate
 var sampleRate;
-var timeGap;
+var bufferSize;
 
 var audiostream;
-
-
 
 this.onmessage = function(e) {
   switch (e.data.command) {
@@ -65,26 +71,29 @@ this.onmessage = function(e) {
     case 'stopRecording':
       stopRecording();
       break;
+    case 'startCriteriaRec':
+      triggerRecCriteria = true;
+      break;
+      
   }
 };
 
 function init(data) {
-  rmsThreshold = data.values.rmsThreshold;
-  console.log("rms threshold set to: " + rmsThreshold);
-  bufferSize = data.values.bufferSize;
   id = data.values.id;
+  onsetThreshold = data.values.onsetThreshold;
+  minInterOnsetTime = data.values.minInterOnsetTime;
+  bufferSize = data.values.bufferSize;
   sampleRate = data.values.sampleRate;
-  timeGap = data.values.timeGap;
-  console.log('timegap set to: ' + data.values.timeGap);
 
-  //instantiate the recorder
+  console.log('init client: ' + id + ', onsetThreshold: ' + onsetThreshold + ', minInterOnsetTime: ' + minInterOnsetTime);
+
+  //instantiate the wav recorder
   recorder = new Recorder(recordingTime, 1, sampleRate);
 }
 
 function startRecording(e) {
   this.recording = true;
   console.log('----recording state: ' + this.recording);
-
 }
 
 function stopRecording(e) {
@@ -100,25 +109,25 @@ function audioProcessing(inputFrame, timeRefFrame) {
   var time = playbackTime;
   //var count = playbackCount;
   var timeIncr = 1.0 / sampleRate;
+
+  //gap detection variables
   var gapTime = 0.0;
   var gapCount = 0;
   var refSample = timeRefFrame[0];
-  var maxRms = -999;
 
+  //clip detection variables
+  var numClippedSamples = 0;
 
   var rmsValues = [];
 
   this.audioStream = inputFrame;
-  //var refSample = Math.floor(0.5 * sampleRate * (timeRefFrame[0] + 1) + 0.5);
 
-  //analysis of reference signal to check for gaps
+  //channel 1: analysis of reference signal for gap time correction ======================
   if (lastRefSample > 0) {
     var deltaCount = refSample - lastRefSample;
 
     if (deltaCount < bufferSize)
       deltaCount += sampleRate;
-
-    //console.log("delta: " + deltaCount);
 
     gapCount = deltaCount - bufferSize;
     gapTime = gapCount * timeIncr;
@@ -131,30 +140,27 @@ function audioProcessing(inputFrame, timeRefFrame) {
           type: 'sendingGap', //sendingMaxArray',
           values: {
             myID: id,
-            gapCount: gapCount, //maxSampleTimes.join('\n')
+            gapCount: gapCount,
             gapTime: gapTime
           }
         }
       });
     }
-
   }
-  // comment this to disable time correction
+
   lastRefSample = refSample;
+  time += gapTime; //time correction
+  //end channel 1 =========================================================================
 
-  time += gapTime;
-
-
-
-  //audio analysis of microphone input on channel 0                         
+  //channel 0: audio analysis of microphone input =========================================                       
   for (var i = 0; i < inputFrame.length; i++) {
     var sample = inputFrame[i];
     var sqsample = sample * sample;
     var sampleLogRms = 0.5 * Math.log(sqsample);
     var j;
 
-    //Sync and OnSet Detector------------------------------------------
-    // calculate slow RMS
+    //--- onset detection ------------------------------------------
+    //slow ring buffer
     slowRingSamples[slowRingIndex] = sqsample;
     slowRingIndex = (slowRingIndex + 1) % slowRingSamples.length;
 
@@ -163,11 +169,9 @@ function audioProcessing(inputFrame, timeRefFrame) {
     for (j = 0; j < slowRingSamples.length; j++)
       slowSum += slowRingSamples[j];
 
-    //console.log('meanSquare: '+ meanSquare);
-
     var slowLogRms = 0.5 * Math.log(slowSum / slowRingSamples.length + 0.000001);
 
-    // calculate fast RMS
+    //fast ring buffer
     fastRingSamples[fastRingIndex] = sqsample;
     fastRingIndex = (fastRingIndex + 1) % fastRingSamples.length;
 
@@ -178,113 +182,141 @@ function audioProcessing(inputFrame, timeRefFrame) {
 
     var fastLogRms = 0.5 * Math.log(fastSum / fastRingSamples.length + 0.000001);
 
-    //log rms/lastRMS values:
-    if (rmsLogCount >=0 && rmsLogCount < numRecFrames) {
-      rmsValuesConcatenated += (slowLogRms + ',' + sample + ',' + (fastLogRms - lastSlowLogRms) + '\n');
-      rmsLogCount++;
-    }
-    //console.log('rmsValues[i]: ' + rmsValues);
+    // check for onset ------------------------------------------
+    if (fastLogRms - lastSlowLogRms >= onsetThreshold && time - lastOnsetTime > minInterOnsetTime) {
 
-    // console.log('_____________');
-    // console.log('lastSlowLogRms: ' + lastSlowLogRms);
-    // console.log('____rms: ' + slowLogRms);
-    // console.log('rms - lastRms: ' + (slowLogRms - lastSlowLogRms));
+      // start recording onset samples after onset
+      postOnsetSampleCount = 0;
 
-    // console.log('_time-local: ' + time);
-    // console.log('time-synced: ' + (time - syncTime));
-    if (fastLogRms - lastSlowLogRms >= 0.6 && time - lastOnsetTime > timeGap) {
-    
-      //sychronize time on first maximum
+      var sendTime;
+
+      // sychronize time on first maximum
       if (syncOnOnset === true) {
-        console.log('-------time synced--------');
+        sendTime = time;
         syncOnOnset = false;
         syncTime = time;
-        rmsLogCount = 0;
-        rmsValuesConcatenated = '';
-
-        this.postMessage({
-          type: 'through',
-          sub: {
-            type: 'sendingOnsetTime',
-            values: {
-              myID: id,
-              onsetTime: (time - syncTime),
-              sample: sample
-              //count: maxSampleTimesCounter
-            }
-          }
-        });
-
-        // this.postMessage({
-        //   type: 'play',
-        // });
-
+        recCount = 0;
       } else {
-
-        this.postMessage({
-          type: 'through',
-          sub: {
-            type: 'sendingOnsetTime',
-            values: {
-              myID: id,
-              onsetTime: (time - syncTime),
-              sample: sample
-              //count: maxSampleTimesCounter
-            }
-          }
-        });
+        sendTime = time - syncTime;
       }
 
-      lastOnsetTime = time;
-    }
+      serverOnsetTime = time - syncTime; //to be removed!!!!!!!
 
-    lastSlowLogRms = slowLogRms;
-
-    //recording------------------------------------------------
-    if (this.recording) {
-      this.recording = this.recorder.input(inputFrame[i]);
-
-      if (!this.recording) stopRecording();
-    }
-
-    //report clipping
-    if (sample > 0.98) {
       this.postMessage({
-        type: 'through', //'sending_max_array',
+        type: 'through',
         sub: {
-          type: 'sendClipping', //sendingMaxArray',
+          type: 'sendingOnsetTime',
           values: {
             myID: id,
-            clipTime: (time - syncTime),
-            clipSample: sample
+            onsetTime: sendTime, // sync time
+            sample: sample,
           }
         }
       });
-    }
+
+      lastOnsetTime = time;
+    } // end onset ---------------------------------------------
+
+    lastSlowLogRms = slowLogRms;
+
+    // // --- record onset samples ---------------------------------------------
+    // if(postOnsetSampleCount < 0) {
+    //   // record pre-onset samples in ringbuffer
+    //   preOnsetRingBuffer[preOnsetRingIndex] = sample;
+    //   preOnsetRingIndex = (preOnsetRingIndex + 1) % preOnsetRingBuffer.length;
+    // } else if(postOnsetSampleCount < numPostOnsetSamples) {
+    //   // record post-onset samples
+    //   postOnsetSamples[postOnsetSampleCount] = sample;
+    //   postOnsetSampleCount++;
+    // }
+
+    // if (postOnsetSampleCount === numPostOnsetSamples) {
+    //   // join pre-onset samples from ringuffer and post-onset sample 
+    //   var sendBuffer = preOnsetRingBuffer.slice(preOnsetRingIndex, preOnsetRingSize);
+
+    //   if(preOnsetRingIndex > 0) {
+    //     sendBuffer = sendBuffer.concat(preOnsetRingBuffer.slice(0, preOnsetRingIndex));
+    //   }
+
+    //   sendBuffer = sendBuffer.concat(postOnsetSamples);
+
+    //   // send array of onset samples to server
+    //   this.postMessage({
+    //     type: 'through',
+    //     sub: {
+    //       type: 'sendingOnsetSamples',
+    //       values: {
+    //         myID: id,
+    //         onsetSamples: sendBuffer,
+    //         onsetTime: serverOnsetTime,
+    //         sampleRate: sampleRate
+    //       }
+    //     }
+    //   });
+
+    //   postOnsetSampleCount = -1;
+    // }
+
+    // // --- record criteria ----------------------------------- 
+    // if(triggerRecCriteria) {
+    //   recCriteriaString = '';
+    //   recCriteriaCount = 0;
+    //   triggerRecCriteria = false;
+    // }
+
+    // // concat criteria
+    // if(recCriteriaCount >= 0) {
+    //   recCriteriaString += (sample + ',' + (fastLogRms - lastSlowLogRms) + '\n');
+    //   recCriteriaCount++;
+    // }
+
+    // // send criteria
+    // if (recCriteriaCount === numRecCriteria) {
+    //   console.log('###sending criteria to server#####' + recCriteriaCount);
+    //   this.postMessage({
+    //     type: 'through',
+    //     sub: {
+    //       type: 'sendingCriteriaString',
+    //       values: {
+    //         myID: id,
+    //         criteriaString: recCriteriaString,
+    //       }
+    //     }
+    //   });
+
+    //   recCriteriaCount = -1;
+    // }
+
+    // // wav recording
+    // if (this.recording) {
+    //   this.recording = this.recorder.input(inputFrame[i]);
+
+    //   if (!this.recording) stopRecording();
+    // }
+
+    // // count clipping
+    // if (Math.abs(sample) > 0.98) {
+    //   numClippedSamples++;
+    // }
 
     time += timeIncr;
   }
-  
-  ////send files to 
-  // if(rmsLogCount === numRecFrames) {
-  //   rmsLogCount = -1;
+  //end channel 0 =========================================================================
 
-  //   console.log('###sendingRmsValues to server#####' + rmsLogCount);
-  //   //console.log(rmsValuesConcatenated);
+  // // report clipping
+  // if (numClippedSamples > 0) {
   //   this.postMessage({
   //     type: 'through',
   //     sub: {
-  //       type: 'sendingRmsValues',
+  //       type: 'sendClipping',
   //       values: {
   //         myID: id,
-  //         rmsValues: rmsValuesConcatenated,
-  //         //rmscounter: rmsLogCount
+  //         frameTime: playbackTime,
+  //         numClipping: numClippedSamples
   //       }
   //     }
   //   });
   // }
 
-   //playbackCount += bufferSize;
   playbackTime += bufferSize / sampleRate;
-
 }
