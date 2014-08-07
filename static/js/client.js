@@ -3,7 +3,6 @@ window.audioContext = window.audioContext || new AudioContext();
 
 document.addEventListener('DOMContentLoaded', init);
 
-
 // General helper functions
 // ------------------------
 
@@ -23,7 +22,6 @@ function loadFile(url, cb) {
     request.send();
 }
 
-
 ///// start ID check and socket communication---------------------------------------------------
 var socket = io(document.URL);
 var sockId;
@@ -31,17 +29,13 @@ var sockId;
 //receiving from server\\\\\\\\\
 socket.on('message', function(message) {
 	var type = message.type;
-	console.log('message type received: ', message.type);
+	console.log('>client received message type: ', message.type);
 	switch (type) {
 		case 'connectionStatus':
 			setConnectionStatus(message.data);
 			break;
 		case 'timeReset':
 			auProc.resetTimeSync();
-			break;
-		case 'setTimeGap':
-			//console.log('-----------timeGap: ' + message.data);
-			auProc.minInterOnsetTime = message.data;
 			break;
 	}
 });
@@ -52,25 +46,28 @@ function setConnectionStatus(status) {
 	document.querySelector('.status-holder').innerHTML = status;
 }
 
-// function resetTime {
-
-// }
 
 function microReady(stream) {
 	//display telefunker ID in UI
 	document.querySelector('h1 span').innerHTML = sockId.id;
 
-	auProc.id = sockId.id;
-	sockId.micReady(); //emit mic ready
+	auProc.init(sockId.id, stream);
+
+	// send id to server
+	socket.emit('message', {
+		type: 'micReady',
+		data: sockId.id
+	});
+
 	sockId.allConnected = function() {
-		auProc.init(stream);
+		console.log('all connected, starting audio process');
 		document.querySelector('.status-holder').innerHTML = '--all in - let\'s synchronize--';
+
+		auProc.start();
 	};
 }
 
-
 function init() {
-
 	sockId = socketId(socket);
 	
 	//display ID on UI
@@ -84,11 +81,6 @@ function init() {
 
 	document.querySelector('#stopRec').addEventListener('click', function() {
 		auProc.stopRecording();
-		//this.disabled = true;
-	});
-
-	document.querySelector('#recordCriteria').addEventListener('click', function() {
-		auProc.startCriteriaRec();
 	});
 
 	//clear buttoni
@@ -100,6 +92,10 @@ function init() {
 		});
 	});
 
+	//criteria recording buttoni
+	document.querySelector('#recordCriteria').addEventListener('click', function() {
+		auProc.startCriteriaRec();
+	});
 
 	//reset buttoni
 	document.querySelector(".reset_button").addEventListener('click', function() {
@@ -119,7 +115,6 @@ function init() {
 	// playing the sound
 	// auProc.play()
 
-
 	// get the input audio stream and set up the nodes
 	try {
 		var settings = {
@@ -134,5 +129,4 @@ function init() {
 	} catch (e) {
 		alert('webkitGetUserMedia threw exception :' + e);
 	}
-
 }

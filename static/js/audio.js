@@ -1,16 +1,16 @@
+window.audioContext = window.audioContext || new AudioContext();
+
 var auProc = {
 
   id: null,
   buffer : null,
   bufferSize: 16384, //2048, // number of samples to collect before analyzing
 
-  sampleThreshold: 0.189, //Linux = 0.32
-  sampleThresholdPhone: 0.93, //nexus 3 = 0.7 nexus 4 = 0.55
-
   onsetThreshold: 0.0,
-  onsetThresholdOnAndroidPhone: 0.8,
-  onstThresholdByDefault: 0.8,
+  onsetThresholdOnAndroidPhone: 0.9,
+  onstThresholdByDefault: 0.9,
 
+  isEnabled: false,
 
   worker: new Worker("js/audioWorker.js"),
 
@@ -34,15 +34,16 @@ var auProc = {
     });
   },
 
-
   // Entry point
-  init: function init(stream) {
+  init: function init(id, stream) {
     var that = this;
+
+    this.id = id;
 
     //platform/OS check to set threshold
     this.setThreshold(platform.os.family);
 
-    //console.log('posting init to worker');
+    console.log(this.id + ' is posting init to worker');
     ////sending init to worker
     this.worker.postMessage({
       command: 'init',
@@ -51,11 +52,31 @@ var auProc = {
         onsetThreshold: this.onsetThreshold,
         bufferSize: this.bufferSize,
         sampleRate: audioContext.sampleRate,
-        minInterOnsetTime: this.minInterOnsetTime
       }
     });
 
-    // create a sawtooth as a reference signal
+    this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 2, 2);
+    this.jsNode.connect(audioContext.destination);
+
+    this.merger = audioContext.createChannelMerger(2);
+    this.merger.connect(this.jsNode);
+
+    // input filter----------------------------------
+    // this.filter = audioContext.createBiquadFilter();
+    // this.filter.type = this.filter.LOWPASS;
+    // this.filter.frequency.value = 2000;
+    // this.filter.Q.value = 0;
+    // this.filter.connect(this.merger, 0, 0);
+
+    // create the media stream from the audio input source (microphone)
+    this.audioInputSplitter = audioContext.createChannelSplitter(2);
+    this.audioInputSplitter.connect(this.merger, 0, 0);
+    // this.audioInputSplitter.connect(this.filter, 0, 0);
+    
+    this.audioInput = audioContext.createMediaStreamSource(stream);
+    this.audioInput.connect(this.audioInputSplitter);
+
+    // create a sawtooth as a reference signal to be send on channel 1
     this.audioBuffer = audioContext.createBuffer(1, audioContext.sampleRate, audioContext.sampleRate);
     var buf = this.audioBuffer.getChannelData(0);
 
@@ -66,27 +87,7 @@ var auProc = {
     this.refSource.buffer = this.audioBuffer;
     this.refSource.loop = true;
     this.refSource.start(0);
-
-
-    // create the media stream from the audio input source (microphone)
-    this.audioInput = audioContext.createMediaStreamSource(stream);
-    this.audioInputSplitter = audioContext.createChannelSplitter(2);
-    this.merger = audioContext.createChannelMerger(2);
-    this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 2, 2);
-
-    //filter----------------------------------
-    this.filter = audioContext.createBiquadFilter();
-    this.filter.type = this.filter.LOWPASS;
-    this.filter.frequency.value = 10000;
-    this.filter.Q.value = 0;
-
-    this.audioInput.connect(this.audioInputSplitter);
-    this.audioInputSplitter.connect(this.filter, 0, 0);
-    this.filter.connect(this.merger, 0, 0);
-
     this.refSource.connect(this.merger, 0, 1);
-    this.merger.connect(this.jsNode);
-    this.jsNode.connect(audioContext.destination);
 
     console.log('////audio nodes set up');
 
@@ -95,15 +96,17 @@ var auProc = {
     // analyze audio from microphone
     // take first stimulus as a calibration for the time
     this.jsNode.onaudioprocess = function(event) {
-      that.worker.postMessage({
-        command: 'processaudio',
-        inputFrame: event.inputBuffer.getChannelData(0),
-        timeRefFrame: event.inputBuffer.getChannelData(1),
-      });
-
+      if (that.isEnabled) {
+        that.worker.postMessage({
+          command: 'processaudio',
+          inputFrame: event.inputBuffer.getChannelData(0),
+          timeRefFrame: event.inputBuffer.getChannelData(1),
+        });
+      }
     };
 
-    this.worker.onmessage = function(event) {
+    //receiving from worker
+    this.worker.addEventListener("message", function(event) {
       switch (event.data.type) {
         case 'saveRecording':
           //save recording
@@ -117,7 +120,6 @@ var auProc = {
 
           //stop recording----------------------------
           that.jsNode.onaudioprocess = null;
-          // if (that.audioStream) that.audioStream.stop();
           if (that.audioInput) that.audioInput.disconnect();
           document.querySelector('.status-holder').innerHTML = '--stopped recording--';
           // console.log(event);
@@ -131,8 +133,11 @@ var auProc = {
           that.play();
           break;
       }
-    };
+    }, false);
+  },
 
+  start: function start() {
+    this.isEnabled = true;
   },
 
   startRecording: function startRecording(e) {
@@ -164,5 +169,4 @@ var auProc = {
     console.log('///play signal!');
     var time = audioContext.currentTime; //set a timestamp
   }
-
 };

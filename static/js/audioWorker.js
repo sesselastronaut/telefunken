@@ -1,41 +1,36 @@
 importScripts('lib/recorder.js');
+
 var playbackTime = 0;
-//var playbackCount = 0;
 
-var syncTime = 0.0; //to be removed!!!
-var serverOnsetTime = 0;
-var syncOnOnset = true;
-
-
-var lastRefSample = 0; //used for gap detection
+//gap detection
+var lastRefSample = 0;
 
 // onset detector 
 var lastOnsetTime = -999;
 
 var lastSlowLogRms = 0;
+var slowRmsSum = 0;
 var slowRingSamples = [];
 var slowRingIndex = 0;
-slowRingSamples[880] = 0;
+var slowRingSize = 0;
 
+var fastRmsSum = 0;
 var fastRingSamples = [];
 var fastRingIndex = 0;
-fastRingSamples[88] = 0;
+var fastRingSize = 0;
 
 // onset recorder (for correlation on server)
-var numOnsetSamples = 300;
+var numOnsetSamples = 0;
 
 var preOnsetRingBuffer = [];
 var preOnsetRingIndex = 0;
-var preOnsetRingSize = numOnsetSamples / 4;
-preOnsetRingBuffer[preOnsetRingSize - 1] = 0;
+var preOnsetRingSize = 0;
 
-var numPostOnsetSamples = numOnsetSamples - preOnsetRingSize;
-var postOnsetSampleCount = -1;
 var postOnsetSamples = [];
-postOnsetSamples[numPostOnsetSamples - 1] = 0;
+var numPostOnsetSamples = 0;
+var postOnsetSampleCount = -1;
 
 // wav file recorder
-var recCount = -1;
 var recording = false;
 var recordingTime = 5;
 
@@ -45,25 +40,20 @@ var recCriteriaString = '';
 var recCriteriaCount = -1;
 var numRecCriteria = 88200;
 
-// common client parameters
+// common client parameters send from server
 var id;
 var onsetThreshold;
-var minInterOnsetTime; //inter onset time gate
 var sampleRate;
 var bufferSize;
+var minInterOnsetTime = 0.08; //inter onset time gate
 
-var audiostream;
-
-this.onmessage = function(e) {
+onmessage = function(e) {
   switch (e.data.command) {
     case 'init':
       init(e.data);
       break;
     case 'processaudio':
       audioProcessing(e.data.inputFrame, e.data.timeRefFrame);
-      break;
-    case 'resetTimeSync':
-      syncOnOnset = true;
       break;
     case 'startRecording':
       startRecording();
@@ -74,21 +64,35 @@ this.onmessage = function(e) {
     case 'startCriteriaRec':
       triggerRecCriteria = true;
       break;
-      
   }
 };
 
 function init(data) {
+  var i;
+
   id = data.values.id;
   onsetThreshold = data.values.onsetThreshold;
-  minInterOnsetTime = data.values.minInterOnsetTime;
   bufferSize = data.values.bufferSize;
   sampleRate = data.values.sampleRate;
 
-  console.log('init client: ' + id + ', onsetThreshold: ' + onsetThreshold + ', minInterOnsetTime: ' + minInterOnsetTime);
-
   //instantiate the wav recorder
   recorder = new Recorder(recordingTime, 1, sampleRate);
+
+  slowRingSize = Math.floor(0.020 * sampleRate);
+
+  for (i = 0; i < slowRingSize; i++)
+    slowRingSamples[i] = 0;
+
+  fastRingSize = Math.floor(0.002 * sampleRate);
+
+  for (i = 0; i < fastRingSize; i++)
+    fastRingSamples[i] = 0;
+
+  numOnsetSamples = Math.floor(0.010 * sampleRate);
+  preOnsetRingSize = Math.floor(numOnsetSamples / 4);
+  numPostOnsetSamples = numOnsetSamples - preOnsetRingSize;
+
+  console.log('init client (worker): ' + id + ', onsetThreshold: ' + onsetThreshold + ', numOnsetSamples: ' + numOnsetSamples);
 }
 
 function startRecording(e) {
@@ -107,22 +111,16 @@ function stopRecording(e) {
 
 function audioProcessing(inputFrame, timeRefFrame) {
   var time = playbackTime;
-  //var count = playbackCount;
   var timeIncr = 1.0 / sampleRate;
-
-  //gap detection variables
-  var gapTime = 0.0;
-  var gapCount = 0;
-  var refSample = timeRefFrame[0];
 
   //clip detection variables
   var numClippedSamples = 0;
 
-  var rmsValues = [];
-
-  this.audioStream = inputFrame;
-
   //channel 1: analysis of reference signal for gap time correction ======================
+  var gapTime = 0.0;
+  var gapCount = 0;
+  var refSample = timeRefFrame[0];
+
   if (lastRefSample > 0) {
     var deltaCount = refSample - lastRefSample;
 
@@ -133,11 +131,10 @@ function audioProcessing(inputFrame, timeRefFrame) {
     gapTime = gapCount * timeIncr;
 
     if (gapCount !== 0) {
-
       this.postMessage({
-        type: 'through', //'sending_max_array',
+        type: 'through',
         sub: {
-          type: 'sendingGap', //sendingMaxArray',
+          type: 'sendingGap',
           values: {
             myID: id,
             gapCount: gapCount,
@@ -155,75 +152,40 @@ function audioProcessing(inputFrame, timeRefFrame) {
   //channel 0: audio analysis of microphone input =========================================                       
   for (var i = 0; i < inputFrame.length; i++) {
     var sample = inputFrame[i];
-    var sqsample = sample * sample;
-    var sampleLogRms = 0.5 * Math.log(sqsample);
-    var j;
+    var sqSample = sample * sample;
+    var sampleLogRms = 0.5 * Math.log(sqSample);
 
     //--- onset detection ------------------------------------------
     //slow ring buffer
-    slowRingSamples[slowRingIndex] = sqsample;
+    slowRmsSum -= slowRingSamples[slowRingIndex];
+    slowRmsSum += sqSample;
+    slowRingSamples[slowRingIndex] = sqSample;
     slowRingIndex = (slowRingIndex + 1) % slowRingSamples.length;
 
-    var slowSum = 0;
-
-    for (j = 0; j < slowRingSamples.length; j++)
-      slowSum += slowRingSamples[j];
-
-    var slowLogRms = 0.5 * Math.log(slowSum / slowRingSamples.length + 0.000001);
+    var slowLogRms = 0.5 * Math.log(slowRmsSum / slowRingSamples.length + 0.000001);
 
     //fast ring buffer
-    fastRingSamples[fastRingIndex] = sqsample;
+    fastRmsSum -= fastRingSamples[fastRingIndex];
+    fastRmsSum += sqSample;
+    fastRingSamples[fastRingIndex] = sqSample;
     fastRingIndex = (fastRingIndex + 1) % fastRingSamples.length;
 
-    var fastSum = 0;
+    var fastLogRms = 0.5 * Math.log(fastRmsSum / fastRingSamples.length + 0.000001);
 
-    for (j = 0; j < fastRingSamples.length; j++)
-      fastSum += fastRingSamples[j];
-
-    var fastLogRms = 0.5 * Math.log(fastSum / fastRingSamples.length + 0.000001);
+    var odf = fastLogRms - lastSlowLogRms; //onset-detection-function
+    lastSlowLogRms = slowLogRms;
 
     // check for onset ------------------------------------------
-    if (fastLogRms - lastSlowLogRms >= onsetThreshold && time - lastOnsetTime > minInterOnsetTime) {
-
-      // start recording onset samples after onset
-      postOnsetSampleCount = 0;
-
-      var sendTime;
-
-      // sychronize time on first maximum
-      if (syncOnOnset === true) {
-        sendTime = time;
-        syncOnOnset = false;
-        syncTime = time;
-        recCount = 0;
-      } else {
-        sendTime = time - syncTime;
-      }
-
-      serverOnsetTime = time - syncTime; //to be removed!!!!!!!
-
-      this.postMessage({
-        type: 'through',
-        sub: {
-          type: 'sendingOnsetTime',
-          values: {
-            myID: id,
-            onsetTime: sendTime, // sync time
-            sample: sample,
-          }
-        }
-      });
-
+    if (odf >= onsetThreshold && time - lastOnsetTime > minInterOnsetTime) {
       lastOnsetTime = time;
-    } // end onset ---------------------------------------------
-
-    lastSlowLogRms = slowLogRms;
+      postOnsetSampleCount = 0; // start recording onset samples after onset
+    }
 
     // --- record onset samples ---------------------------------------------
     if(postOnsetSampleCount < 0) {
       // record pre-onset samples in ringbuffer
       preOnsetRingBuffer[preOnsetRingIndex] = sample;
-      preOnsetRingIndex = (preOnsetRingIndex + 1) % preOnsetRingBuffer.length;
+      preOnsetRingIndex = (preOnsetRingIndex + 1) % preOnsetRingSize;
     } else if(postOnsetSampleCount < numPostOnsetSamples) {
       // record post-onset samples
       postOnsetSamples[postOnsetSampleCount] = sample;
@@ -248,8 +210,10 @@ function audioProcessing(inputFrame, timeRefFrame) {
           values: {
             myID: id,
             onsetSamples: sendBuffer,
-            onsetTime: serverOnsetTime,
-            sampleRate: sampleRate
+            onsetTime: lastOnsetTime,
+            sampleRate: sampleRate,
+            corrSampleOffset: preOnsetRingSize,
+            corrWindowSize: numOnsetSamples - 2 * preOnsetRingSize
           }
         }
       });
@@ -291,7 +255,8 @@ function audioProcessing(inputFrame, timeRefFrame) {
     if (this.recording) {
       this.recording = this.recorder.input(inputFrame[i]);
 
-      if (!this.recording) stopRecording();
+      if (!this.recording)
+        stopRecording();
     }
 
     // count clipping

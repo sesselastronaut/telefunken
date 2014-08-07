@@ -49,11 +49,3 @@ function socketId(socket) {
     });
   }
 }
-
-socketId.prototype.micReady = function() {
-  ////////emitting to client
-  socket.emit('message', {
-    type: 'micReady',
-    data: this.id
-  });
-};
