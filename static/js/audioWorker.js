@@ -8,7 +8,7 @@ var lastRefSample = 0;
 // onset detector 
 var lastOnsetTime = -999;
 
-var lastSlowLogRms = 0;
+var lastSlowLogRms = 999;
 var slowRmsSum = 0;
 var slowRingSamples = [];
 var slowRingIndex = 0;
@@ -39,6 +39,8 @@ var triggerRecCriteria = false;
 var recCriteriaString = '';
 var recCriteriaCount = -1;
 var numRecCriteria = 88200;
+
+var osFamily;
 
 // common client parameters send from server
 var id;
@@ -71,9 +73,10 @@ function init(data) {
   var i;
 
   id = data.values.id;
-  onsetThreshold = data.values.onsetThreshold;
   bufferSize = data.values.bufferSize;
   sampleRate = data.values.sampleRate;
+  onsetThreshold = data.values.onsetThreshold;
+  hack480problemo = data.values.hack480problemo;
 
   //instantiate the wav recorder
   recorder = new Recorder(recordingTime, 1, sampleRate);
@@ -160,17 +163,19 @@ function audioProcessing(inputFrame, timeRefFrame) {
     slowRmsSum -= slowRingSamples[slowRingIndex];
     slowRmsSum += sqSample;
     slowRingSamples[slowRingIndex] = sqSample;
-    slowRingIndex = (slowRingIndex + 1) % slowRingSamples.length;
+    slowRingIndex = (slowRingIndex + 1) % slowRingSize;
 
-    var slowLogRms = 0.5 * Math.log(slowRmsSum / slowRingSamples.length + 0.000001);
+    var slowLogRms = 0.5 * Math.log(slowRmsSum / slowRingSize + 0.000001);
 
     //fast ring buffer
     fastRmsSum -= fastRingSamples[fastRingIndex];
     fastRmsSum += sqSample;
     fastRingSamples[fastRingIndex] = sqSample;
-    fastRingIndex = (fastRingIndex + 1) % fastRingSamples.length;
+    fastRingIndex = (fastRingIndex + 1) % fastRingSize;
 
-    var fastLogRms = 0.5 * Math.log(fastRmsSum / fastRingSamples.length + 0.000001);
+    var fastLogRms = 0.5 * Math.log(fastRmsSum / fastRingSize + 0.000001);
+
+    //send fastLogRms to server
 
     var odf = fastLogRms - lastSlowLogRms; //onset-detection-function
     lastSlowLogRms = slowLogRms;
@@ -211,9 +216,11 @@ function audioProcessing(inputFrame, timeRefFrame) {
             myID: id,
             onsetSamples: sendBuffer,
             onsetTime: lastOnsetTime,
+            fastLogRms: fastLogRms,
             sampleRate: sampleRate,
             corrSampleOffset: preOnsetRingSize,
-            corrWindowSize: numOnsetSamples - 2 * preOnsetRingSize
+            corrWindowSize: numOnsetSamples - 2 * preOnsetRingSize,
+            hack480problemo: hack480problemo
           }
         }
       });

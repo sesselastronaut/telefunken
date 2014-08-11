@@ -37,6 +37,9 @@ socket.on('message', function(message) {
 		case 'timeReset':
 			auProc.resetTimeSync();
 			break;
+		case 'sendDistTimeDiff':
+			auProc.receiveDistTimeDiff(message.id, message.data);
+			break;
 	}
 });
 

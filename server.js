@@ -49,6 +49,8 @@ function saveMultipleArraysInterleaved(arrayOfArrays, numArrays, filename) {
 
 var telefunkerOnsetTimes = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 var telefunkerBuffers = [null, null, null, null, null, null, null, null, null, null, null, null];
+var telefunkerProblemo = [];
+
 var lastOnsetTime = 0;
 var numReceivedTelefunkers = 0;
 var onsetTimeDiff = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -115,13 +117,15 @@ io.on('connection', function(socket) {
 		var sampleRate = values.sampleRate;
 		var corrSampleOffset = values.corrSampleOffset;
 		var corrWindowSize = values.corrWindowSize;
-		var i;
+		var hack480problemo = values.hack480problemo;
+		var i, k;
 
 		if(telefunkerBuffers[idx] === null)
 			numReceivedTelefunkers++;
 
 		telefunkerBuffers[idx] = onsetSamples;
 		telefunkerOnsetTimes[idx] = onsetTime;
+		telefunkerProblemo[idx] = hack480problemo;
 
 		if(numReceivedTelefunkers === sockId.maxClients) {
 			commonOnsetCounter++;
@@ -130,30 +134,54 @@ io.on('connection', function(socket) {
 
 			var bufferSize = telefunkerBuffers[0].length;
 		
-			console.log('__________________________');
+			console.log('________________________________________________________________________________');
 
-			var corrWindow = telefunkerBuffers[0].slice(corrSampleOffset, corrSampleOffset + corrWindowSize);
+			//onsetTimeDiff[0] = 0;
+			//distTimeDiff[0] = 0;
 
-			onsetTimeDiff[0] = 0;
-			distTimeDiff[0] = 0;
+			for (k = 0; k < sockId.maxClients; k++) {
+				i = (k + 1) % sockId.maxClients;
+				console.log('client ' + (i + 1) + ' to ' + (k + 1) +' onset times: ' +
+					telefunkerOnsetTimes[i] + ' - ' + telefunkerOnsetTimes[k] + ' diff:' +
+					(telefunkerOnsetTimes[i]-telefunkerOnsetTimes[k]) + 's' + ' hack: ' + telefunkerProblemo[i]);
+			}
+			console.log('---------------------------');
 
-			console.log('onset times: ' + telefunkerOnsetTimes[0] + ' - ' + telefunkerOnsetTimes[1] + ' diff:' + (telefunkerOnsetTimes[0]-telefunkerOnsetTimes[1]) + ' s');
+			for (k = 0; k < sockId.maxClients; k++) {
+				var corrWindow = telefunkerBuffers[k].slice(corrSampleOffset, corrSampleOffset + corrWindowSize);
 
-			for (i = 1; i < sockId.maxClients; i++) {
+				i = (k + 1) % sockId.maxClients;
+
 				var crossCorr = crossCorrelation(telefunkerBuffers[i], corrWindow);
 				var maxIndex = getMaximumIndex(crossCorr) - corrSampleOffset;
 				var crossCorrDiffTime = maxIndex / sampleRate;
-				var correctedOnsetTimeDiff = telefunkerOnsetTimes[i] + crossCorrDiffTime - telefunkerOnsetTimes[0];
+				var correctedOnsetTimeDiff = telefunkerOnsetTimes[i] + crossCorrDiffTime - telefunkerOnsetTimes[k];
 
 				if(lastOnsetTime > 0) {
 					var dist = correctedOnsetTimeDiff - onsetTimeDiff[i];
+
+					if (hack480problemo[i] === true || Math.abs(dist) > (480/sampleRate)){
+						var prevDist = dist;
+						dist = 4800/sampleRate * dist %(480/sampleRate);
+						console.log('__ ' + i + ' diffTobig: ' + prevDist + '_____corrected diff: ' + dist + '____');
+						
+					}
 					distTimeDiff[i] = dist;
-					console.log('client ' + (i + 1) + ' distance: ' +
-						dist + ' s, ' +
+
+
+					console.log('client ' + (i + 1) + ' to ' + (k + 1) + ' distance: ' +
+						dist + 's, ' +
 						dist * sampleRate + ' samples, ' +
-						dist * 330000 + ' mm' +
-						' (cc: ' + maxIndex + ')'
+						dist * 330000 + 'mm' +
+						' (cc: ' + maxIndex + ')' +
+						' hack = ' + telefunkerProblemo[i]
 					);
+
+					io.emit('message', {
+						type: 'sendDistTimeDiff',
+						id: i,
+						data: distTimeDiff[i]
+					});
 				}
 
 				onsetTimeDiff[i] = correctedOnsetTimeDiff;
@@ -163,6 +191,7 @@ io.on('connection', function(socket) {
 			numReceivedTelefunkers = 0;
 			for(i = 0; i < sockId.maxClients; i++)
 				telefunkerBuffers[i] = null;
+				telefunkerProblemo[i] = null;
 		}
 
 		lastOnsetTime = onsetTime;

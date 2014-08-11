@@ -1,29 +1,16 @@
 window.audioContext = window.audioContext || new AudioContext();
 
+var prevfreq = 0;
+
 var auProc = {
 
   id: null,
   buffer : null,
   bufferSize: 16384, //2048, // number of samples to collect before analyzing
 
-  onsetThreshold: 0.0,
-  onsetThresholdOnAndroidPhone: 0.9,
-  onstThresholdByDefault: 0.9,
-
   isEnabled: false,
 
   worker: new Worker("js/audioWorker.js"),
-
-  //set threshold depending on OS
-  setThreshold: function setThreshold(string) {
-    var a = string.split(' ');
-    console.log("a[0]: " + a[0]);
-
-    if(a[0] === "Android")
-      this.onsetThreshold = this.onsetThresholdOnAndroidPhone;
-    else
-      this.onsetThreshold = this.onstThresholdByDefault;
-  },
 
   resetTimeSync: function(){
     this.worker.postMessage({
@@ -33,6 +20,16 @@ var auProc = {
       }
     });
   },
+  receiveDistTimeDiff: function(distId, distance){
+    // play(0);
+    if ((this.id -1) === distId) {
+      console.log('id: '+ distId + ' distanceTime: ' + (distance*100000));
+      //this.play(Math.abs(distance)*1000);
+      var freq = distance * 10000;
+      this.osc.frequency.value = (Math.abs(prevfreq - freq));
+      prevfreq = freq;
+    }
+  },
 
   // Entry point
   init: function init(id, stream) {
@@ -40,8 +37,17 @@ var auProc = {
 
     this.id = id;
 
-    //platform/OS check to set threshold
-    this.setThreshold(platform.os.family);
+    //platform/OS dependend audio settings
+    var onsetThreshold = 0.9;
+    var hack480problemo = false;
+
+    var a = platform.os.family.split(' ');
+    console.log("a[0]: " + a[0]);
+
+    if(a[0] === "Android"){
+      //onsetThreshold = 0.8;
+      hack480problemo = true;
+    }
 
     console.log(this.id + ' is posting init to worker');
     ////sending init to worker
@@ -49,12 +55,14 @@ var auProc = {
       command: 'init',
       values: {
         id: this.id,
-        onsetThreshold: this.onsetThreshold,
         bufferSize: this.bufferSize,
         sampleRate: audioContext.sampleRate,
+        onsetThreshold: onsetThreshold,
+        hack480problemo: hack480problemo,
       }
     });
 
+    //audiocontext------------------
     this.jsNode = audioContext.createScriptProcessor(this.bufferSize, 2, 2);
     this.jsNode.connect(audioContext.destination);
 
@@ -62,16 +70,16 @@ var auProc = {
     this.merger.connect(this.jsNode);
 
     // input filter----------------------------------
-    // this.filter = audioContext.createBiquadFilter();
-    // this.filter.type = this.filter.LOWPASS;
-    // this.filter.frequency.value = 2000;
-    // this.filter.Q.value = 0;
-    // this.filter.connect(this.merger, 0, 0);
+    this.filter = audioContext.createBiquadFilter();
+    this.filter.type = this.filter.LOWPASS;
+    this.filter.frequency.value = 2000;
+    this.filter.Q.value = 0;
+    this.filter.connect(this.merger, 0, 0);
 
     // create the media stream from the audio input source (microphone)
     this.audioInputSplitter = audioContext.createChannelSplitter(2);
-    this.audioInputSplitter.connect(this.merger, 0, 0);
-    // this.audioInputSplitter.connect(this.filter, 0, 0);
+    // this.audioInputSplitter.connect(this.merger, 0, 0);
+    this.audioInputSplitter.connect(this.filter, 0, 0);
     
     this.audioInput = audioContext.createMediaStreamSource(stream);
     this.audioInput.connect(this.audioInputSplitter);
@@ -89,12 +97,17 @@ var auProc = {
     this.refSource.start(0);
     this.refSource.connect(this.merger, 0, 1);
 
+    //create a sinewave to be modulated 
+    this.osc = audioContext.createOscillator();
+    this.osc.connect(audioContext.destination);
+    this.osc.noteOn(0);
+    this.osc.frequency.value = 0;
+
     console.log('////audio nodes set up');
 
     console.log('____________starting analyzing mic audio_______ on:', platform.os.family);
 
     // analyze audio from microphone
-    // take first stimulus as a calibration for the time
     this.jsNode.onaudioprocess = function(event) {
       if (that.isEnabled) {
         that.worker.postMessage({
@@ -130,11 +143,13 @@ var auProc = {
           break;
           
         case 'play':
-          that.play();
+          that.play(0);
           break;
       }
     }, false);
   },
+
+
 
   start: function start() {
     this.isEnabled = true;
@@ -161,12 +176,12 @@ var auProc = {
     });
   },
 
-  play: function play() {
+  play: function play(time) {
     var source = audioContext.createBufferSource(); // creates a sound source
     source.buffer = this.buffer; // tell the source which sound to play
     source.connect(audioContext.destination); // connect the source to the context's destination (the speakers)
-    source.start(0); // play the source now
+    source.start(time); // play the source now
     console.log('///play signal!');
-    var time = audioContext.currentTime; //set a timestamp
+    var curtime = audioContext.currentTime; //set a timestamp
   }
 };
