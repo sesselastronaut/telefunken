@@ -40,6 +40,9 @@ socket.on('message', function(message) {
 		case 'sendDistTimeDiff':
 			auProc.receiveDistTimeDiff(message.id, message.data);
 			break;
+		case 'eventOnsetArrays':
+			auProc.playEvents(message.id, message.data, message.gains);
+			break;
 	}
 });
 
@@ -110,7 +113,7 @@ function init() {
 	});
 
 	//load sample file
-	loadFile('./snd/quak.wav', function(b) {
+	loadFile('./snd/cut.wav', function(b) {
 		auProc.buffer = b;
 		console.log('///sound loaded!');
 	});

@@ -1,7 +1,5 @@
 importScripts('lib/recorder.js');
 
-var playbackTime = 0;
-
 //gap detection
 var lastRefSample = 0;
 
@@ -47,7 +45,7 @@ var id;
 var onsetThreshold;
 var sampleRate;
 var bufferSize;
-var minInterOnsetTime = 0.08; //inter onset time gate
+var minInterOnsetTime = 0.09; //inter onset time gate
 
 onmessage = function(e) {
   switch (e.data.command) {
@@ -55,7 +53,7 @@ onmessage = function(e) {
       init(e.data);
       break;
     case 'processaudio':
-      audioProcessing(e.data.inputFrame, e.data.timeRefFrame);
+      audioProcessing(e.data.time, e.data.inputFrame, e.data.timeRefFrame, e.data.outputFrame);
       break;
     case 'startRecording':
       startRecording();
@@ -97,6 +95,7 @@ function init(data) {
 
   console.log('init client (worker): ' + id + ', onsetThreshold: ' + onsetThreshold + ', numOnsetSamples: ' + numOnsetSamples);
 }
+  
 
 function startRecording(e) {
   this.recording = true;
@@ -112,8 +111,7 @@ function stopRecording(e) {
   });
 }
 
-function audioProcessing(inputFrame, timeRefFrame) {
-  var time = playbackTime;
+function audioProcessing(time, inputFrame, timeRefFrame, outputFrame) {
   var timeIncr = 1.0 / sampleRate;
 
   //clip detection variables
@@ -152,7 +150,7 @@ function audioProcessing(inputFrame, timeRefFrame) {
   time += gapTime; //time correction
   //end channel 1 =========================================================================
 
-  //channel 0: audio analysis of microphone input =========================================                       
+   //channel 0: audio analysis of microphone input =========================================                       
   for (var i = 0; i < inputFrame.length; i++) {
     var sample = inputFrame[i];
     var sqSample = sample * sample;
@@ -167,7 +165,13 @@ function audioProcessing(inputFrame, timeRefFrame) {
 
     var slowLogRms = 0.5 * Math.log(slowRmsSum / slowRingSize + 0.000001);
 
-    //fast ring buffer
+    //fast ring buffer      // var outputFrame = event.outputBuffer.getChannelData(0);
+
+      // for (i = 0; i < buf.length; i++) {
+      //   outputFrame[i] = ((Math.random() * 2) - 1);
+      // }
+
+
     fastRmsSum -= fastRingSamples[fastRingIndex];
     fastRmsSum += sqSample;
     fastRingSamples[fastRingIndex] = sqSample;
@@ -237,7 +241,7 @@ function audioProcessing(inputFrame, timeRefFrame) {
 
     // concat criteria
     if(recCriteriaCount >= 0) {
-      recCriteriaString += (sample + ',' + (fastLogRms - lastSlowLogRms) + '\n');
+      recCriteriaString += (sample + ',' + (fastLogRms - lastSlowLogRms) + ',\n');
       recCriteriaCount++;
     }
 
@@ -267,11 +271,11 @@ function audioProcessing(inputFrame, timeRefFrame) {
     }
 
     // count clipping
-    if (Math.abs(sample) > 0.98) {
+    if (Math.abs(sample) > 0.97) {
       numClippedSamples++;
     }
 
-    time += timeIncr;
+   time += timeIncr;
   }
   //end channel 0 =========================================================================
 
@@ -283,12 +287,10 @@ function audioProcessing(inputFrame, timeRefFrame) {
         type: 'sendClipping',
         values: {
           myID: id,
-          frameTime: playbackTime,
+          frameTime: time,
           numClipping: numClippedSamples
         }
       }
     });
   }
-
-  playbackTime += bufferSize / sampleRate;
 }

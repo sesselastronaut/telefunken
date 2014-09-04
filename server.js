@@ -1,5 +1,7 @@
-/* TODO references
- *
+/* TODO 
+ * Object with times and phases to be send
+ * laufzeitunterschied in db mappen
+ * 6db between left and right
  */
 
 // dependencies
@@ -18,11 +20,13 @@ var fs = require('fs');
 // Socket based id handling module
 var sockId = require('./lib/socketId');
 
-var commonOnsetCounter = 0;
+var eventIndex = 0;
 
 function saveArray(array, filename) {
 	var saveStr = array.join(',\n') + ',\n';
-	fs.writeFile(path.join('./data/onsets', filename), saveStr, function(err) { if (err) throw err; });
+	fs.writeFile(path.join('./data/onsets', filename), saveStr, function(err) {
+		if (err) throw err;
+	});
 }
 
 function saveMultipleArraysInterleaved(arrayOfArrays, numArrays, filename) {
@@ -30,13 +34,13 @@ function saveMultipleArraysInterleaved(arrayOfArrays, numArrays, filename) {
 	var saveStr = '';
 	var i, k;
 
-	for(i = 1; i < numArrays; i++) {
-		if(arrayOfArrays[i].length < minLength)
+	for (i = 1; i < numArrays; i++) {
+		if (arrayOfArrays[i].length < minLength)
 			minLength = arrayOfArrays[i].length;
 	}
 
-	for(k = 0; k < minLength; k++) {
-		for(i = 0; i < numArrays; i++) {
+	for (k = 0; k < minLength; k++) {
+		for (i = 0; i < numArrays; i++) {
 			saveStr += arrayOfArrays[i][k];
 			saveStr += ', ';
 		}
@@ -44,19 +48,42 @@ function saveMultipleArraysInterleaved(arrayOfArrays, numArrays, filename) {
 		saveStr += '\n';
 	}
 
-	fs.writeFile(path.join('./data/onsets', filename), saveStr, function(err) { if (err) throw err; });
+	fs.writeFile(path.join('./data/onsets', filename), saveStr, function(err) {
+		if (err) throw err;
+	});
 }
 
-var telefunkerOnsetTimes = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+var diffOnsetTimes = [];
+for (i = 0; i < sockId.maxClients; i++) {
+	diffOnsetTimes[i] = Infinity;
+}
+
+var telefunkerOnsetTimes = [];
+for (i = 0; i < sockId.maxClients; i++) {
+	telefunkerOnsetTimes[i] = 0;
+}
 var telefunkerBuffers = [null, null, null, null, null, null, null, null, null, null, null, null];
 var telefunkerProblemo = [];
 
-var lastOnsetTime = 0;
+var eventOnsetArrays = [];
+for (i = 0; i < sockId.maxClients; i++) {
+	eventOnsetArrays[i] = [];
+}
+
+var diffdiffArrays = [];
+for (i = 0; i < sockId.maxClients; i++) {
+	diffdiffArrays[i] = [];
+}
+
 var numReceivedTelefunkers = 0;
-var onsetTimeDiff = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-var distTimeDiff = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // time shift related to displacement
 
 var minInterOnsetTime = 0.080;
+
+var sendEventsTimeout = null;
+var resetOnsetsTimeout = null;
+var muteTime = 0;
+
+var lastTime = 0;
 
 // app logic
 // ---------
@@ -71,7 +98,7 @@ app.get('/', function(req, res) {
 	sockId.landingPage(vars); // extend the template vars for the landing page
 
 	res.render('layout', vars); // render the page with the set variables
-
+	muteTime = 0;
 });
 
 // Socket events
@@ -89,7 +116,6 @@ io.on('connection', function(socket) {
 		switch (type) {
 			case 'resetTime':
 				console.log('################## reset time');
-				lastOnsetTime = 0;
 				break;
 
 			case 'sendingOnsetSamples':
@@ -110,7 +136,78 @@ io.on('connection', function(socket) {
 		}
 	});
 
-	function receiveOnsetSamples (values){
+	function sendEventOnsetArrays() {
+		var clientIndex;
+		var numOnsets = eventOnsetArrays[0].length;
+		if (numOnsets > 0) {
+			var T = eventOnsetArrays[0][numOnsets - 1] - eventOnsetArrays[0][0] + 2;
+			console.log('----------------------------------------------');
+
+			for (clientIndex = 0; clientIndex < sockId.maxClients; clientIndex++) {
+				var onsets = eventOnsetArrays[clientIndex];
+				//add T to array
+				for (var j = 0; j < onsets.length; j++) {
+					onsets[j] += T;
+				}
+
+				var eventGains = diffdiffArrays[clientIndex];
+				// console.log('diffdiffArrays of: ' + clientIndex + ' = ' + diffdiffArrays[clientIndex]);
+				// map samples to volume 6 db maximum at +- 200samples 
+				// vol = 6 / (1/44100 * 200) = 1323
+				for (j = 1; j < eventGains.length; j++) {
+					eventGains[j] = (eventGains[j] * 1764); //1323
+					if (eventGains[j] > 6)
+						eventGains[j] = 6;
+					else if (eventGains[j] < -6)
+						eventGains[j] = -6;
+
+					// console.log('event '+ j + ' - volume: ' + eventGains[j]);
+					eventGains[j] = Math.pow(10, (eventGains[j]/20));
+					// console.log('event '+ j + ' - gain: ' + eventGains[j]);
+
+				}
+				
+				///emiting to client
+				console.log('>> sending array to client-' + (clientIndex + 1) + ' onsets: ' + onsets + ' volumes: ' + eventGains);
+				io.emit('message', {
+					type: 'eventOnsetArrays',
+					id: clientIndex,
+					data: onsets,
+					gains: eventGains
+				});
+
+				//get mute time from reference clients last onset + 
+				if (clientIndex === 0) {
+					muteTime = onsets[onsets.length - 1] + 1.5;
+					//console.log('set muteTime to: ' + muteTime);
+				}
+				// muteTime = -Infinity;
+
+				eventOnsetArrays[clientIndex] = [];
+				diffdiffArrays[clientIndex] = [];
+				eventIndex = 0;
+			}
+
+			resetOnsets();
+		}
+	}
+
+	function resetOnsets() {
+		numReceivedTelefunkers = 0;
+
+		for (var clientIndex = 0; clientIndex < sockId.maxClients; clientIndex++)
+			telefunkerBuffers[clientIndex] = null;
+	}
+
+	function getDiff(i,j,e) {
+		var diffClient = (eventOnsetArrays[i][e] - eventOnsetArrays[i][0]);
+		var diffClientNext = (eventOnsetArrays[j][e] - eventOnsetArrays[j][0]);
+		var diffDiff = diffClientNext - diffClient;
+		// console.log('    ' + eventOnsetArrays[i][e]);
+		return diffDiff;
+	}
+
+	function receiveOnsetSamples(values) {
 		var idx = values.myID - 1;
 		var onsetSamples = values.onsetSamples;
 		var onsetTime = values.onsetTime;
@@ -118,97 +215,113 @@ io.on('connection', function(socket) {
 		var corrSampleOffset = values.corrSampleOffset;
 		var corrWindowSize = values.corrWindowSize;
 		var hack480problemo = values.hack480problemo;
-		var i, k;
+		var clientIndex;
 
-		if(telefunkerBuffers[idx] === null)
+		console.log('.' + idx);
+
+		if (telefunkerBuffers[idx] === null)
 			numReceivedTelefunkers++;
 
 		telefunkerBuffers[idx] = onsetSamples;
 		telefunkerOnsetTimes[idx] = onsetTime;
 		telefunkerProblemo[idx] = hack480problemo;
 
-		if(numReceivedTelefunkers === sockId.maxClients) {
-			commonOnsetCounter++;
+		if (numReceivedTelefunkers === sockId.maxClients) {
 
-			saveMultipleArraysInterleaved(telefunkerBuffers, sockId.maxClients, commonOnsetCounter + '-onset-samples' + '.txt');
+			if (telefunkerOnsetTimes[0] > muteTime) { // wir sind vor der auszeit
+				var bufferSize = telefunkerBuffers[0].length;
+				var corrWindow = telefunkerBuffers[0].slice(corrSampleOffset, corrSampleOffset + corrWindowSize);
+				var eventOnsets = [];
+				eventOnsets[0] = telefunkerOnsetTimes[0];
 
-			var bufferSize = telefunkerBuffers[0].length;
-		
-			console.log('________________________________________________________________________________');
+				var crossCorrQuality = [];
 
-			//onsetTimeDiff[0] = 0;
-			//distTimeDiff[0] = 0;
+				crossCorrQuality[0] = Infinity;
 
-			for (k = 0; k < sockId.maxClients; k++) {
-				i = (k + 1) % sockId.maxClients;
-				console.log('client ' + (i + 1) + ' to ' + (k + 1) +' onset times: ' +
-					telefunkerOnsetTimes[i] + ' - ' + telefunkerOnsetTimes[k] + ' diff:' +
-					(telefunkerOnsetTimes[i]-telefunkerOnsetTimes[k]) + 's' + ' hack: ' + telefunkerProblemo[i]);
-			}
-			console.log('---------------------------');
+				//console.log('ReferenceOnsetTimes of client: 1 = ' + eventOnsetArrays[0]);
+				for (clientIndex = 1; clientIndex < sockId.maxClients; clientIndex++) {
+					var crossCorr = normCrossCorrelation(telefunkerBuffers[clientIndex], corrWindow);
+					var maxValues = getMaximumValues(crossCorr);
+					var maxIndex = maxValues[0] + corrSampleOffset;
+					var crossCorrDiffTime = maxIndex / sampleRate;
+					var correctedOnsetTime = telefunkerOnsetTimes[clientIndex] + crossCorrDiffTime;
+					// console.log('crossCorrDiffTime: '+ crossCorrDiffTime);
 
-			for (k = 0; k < sockId.maxClients; k++) {
-				var corrWindow = telefunkerBuffers[k].slice(corrSampleOffset, corrSampleOffset + corrWindowSize);
+					//write onset corrected by cross-correlation to array
+					eventOnsets[clientIndex] = correctedOnsetTime;
+					//console.log('correctedOnsetTimes of client: ' + (clientIndex + 1) + ' = ' + eventOnsets[clientIndex]);
 
-				i = (k + 1) % sockId.maxClients;
+					var quality = maxValues[1];
 
-				var crossCorr = crossCorrelation(telefunkerBuffers[i], corrWindow);
-				var maxIndex = getMaximumIndex(crossCorr) - corrSampleOffset;
-				var crossCorrDiffTime = maxIndex / sampleRate;
-				var correctedOnsetTimeDiff = telefunkerOnsetTimes[i] + crossCorrDiffTime - telefunkerOnsetTimes[k];
-
-				if(lastOnsetTime > 0) {
-					var dist = correctedOnsetTimeDiff - onsetTimeDiff[i];
-
-					if (hack480problemo[i] === true || Math.abs(dist) > (480/sampleRate)){
-						var prevDist = dist;
-						dist = 4800/sampleRate * dist %(480/sampleRate);
-						console.log('__ ' + i + ' diffTobig: ' + prevDist + '_____corrected diff: ' + dist + '____');
-						
+					if (quality < 0.4) {
+						console.log('x--o (' + quality + ')');
+						return;
 					}
-					distTimeDiff[i] = dist;
 
-
-					console.log('client ' + (i + 1) + ' to ' + (k + 1) + ' distance: ' +
-						dist + 's, ' +
-						dist * sampleRate + ' samples, ' +
-						dist * 330000 + 'mm' +
-						' (cc: ' + maxIndex + ')' +
-						' hack = ' + telefunkerProblemo[i]
-					);
-
-					io.emit('message', {
-						type: 'sendDistTimeDiff',
-						id: i,
-						data: distTimeDiff[i]
-					});
+					crossCorrQuality[clientIndex] = quality;
+					// console.log('quality: '+ quality);
 				}
 
-				onsetTimeDiff[i] = correctedOnsetTimeDiff;
+				//write onset corrected by crosscorrelation to array
+				//use client with idx 0 as reference
+				for (clientIndex = 0; clientIndex < sockId.maxClients; clientIndex++)
+					eventOnsetArrays[clientIndex][eventIndex] = eventOnsets[clientIndex];
+
+				//difference calculaton----------------------------------
+
+				if (eventIndex === 0) {
+					console.log('###### 0 (0samples)');
+				} else {
+					for (clientIndex = 0; clientIndex < sockId.maxClients; clientIndex++) {
+						nextClientIndex = (clientIndex + 1) % sockId.maxClients;
+						//console.log('clientIndex: '+ clientIndex);
+						diffDiff = getDiff(clientIndex, nextClientIndex, eventIndex);
+						diffdiffArrays[clientIndex][eventIndex] = diffDiff;
+
+						var diffDiffSamples = Math.floor(diffDiff * sampleRate + 0.5);
+						if (Math.abs(diffDiff) > 0.02) {
+							console.log('<--> (' + diffDiff + ')');
+							return;
+						}
+						// if (clientIndex > 0)
+							console.log('####### ' + eventIndex + ' (' + diffDiffSamples + ' samples - diffDiff: ' + diffdiffArrays[clientIndex][eventIndex] + ' quality: ' + crossCorrQuality[clientIndex] + ')');
+						
+					}
+				}
+
+				//comment this to store event criterias
+				//saveMultipleArraysInterleaved(telefunkerBuffers, sockId.maxClients, eventIndex + '-onset-samples' + '.txt');
+
+				if (sendEventsTimeout)
+					clearTimeout(sendEventsTimeout);
+
+				sendEventsTimeout = setTimeout(sendEventOnsetArrays, 1300);
+
+				eventIndex++;
+			} else {
+				// console.log('muted---incoming telefunkerOnsetTimes: ' + telefunkerOnsetTimes[0] + ' --- muteTime: ' + muteTime);
+				console.log('.m');
 			}
 
+			resetOnsets();
 			// reset receiver
-			numReceivedTelefunkers = 0;
-			for(i = 0; i < sockId.maxClients; i++)
-				telefunkerBuffers[i] = null;
-				telefunkerProblemo[i] = null;
 		}
-
-		lastOnsetTime = onsetTime;
 	}
 
-	function getMaximumIndex (array){
+	function getMaximumValues(array) {
 		var max = array[0];
 		var maxIndex = 0;
+		var maxValue = 0;
 
 		for (var i = 1; i < array.length; i++) {
 			if (array[i] > max) {
 				max = array[i];
 				maxIndex = i;
+				maxValue = max;
 			}
 		}
-
-		return maxIndex;
+		// console.log('---maxIndex: ' + maxIndex + ' maxValue: ' + maxValue);
+		return [maxIndex, maxValue];
 	}
 
 	function crossCorrelation(buffer, window) {
@@ -217,7 +330,7 @@ io.on('connection', function(socket) {
 
 		for (var j = 0; j < crossCorrSize; j++) {
 			var sum = 0;
-	
+
 			for (var i = 0; i < window.length; i++) {
 				sum += buffer[i + j] * window[i];
 			}
@@ -228,30 +341,76 @@ io.on('connection', function(socket) {
 		return crossCorr;
 	}
 
-	// function differenceCalculation() {
-	// 		//check for minimum
-	// 		var min = 9999;
-	// 		var minKey = null;
 
-	// 		for (var key in telefunkerOnsetTimes) {
-	// 			if (telefunkerOnsetTimes[key] < min) {
-	// 				min = telefunkerOnsetTimes[key];
-	// 				minKey = key;
-	// 			}
-	// 		}
+	function normCrossCorrelation(buffer, window) {
+		var windowSize = window.length;
+		var crossCorrSize = buffer.length - windowSize;
+		var crossCorr = [];
+		var norm = 1 / windowSize;
+		var bufferSum = 0;
+		var bufferSumOfSquare = 0;
+		var b, w;
 
-	// 		console.log('--------------------------------------');
-	// 		console.log(minKey + ' - time minval: ' + telefunkerOnsetTimes[minKey]);
+		var windowSum = 0;
+		var windowSumOfSquare = 0;
 
-	// 		for (key in telefunkerOnsetTimes) {
-	// 			if (key !== minKey) {
-	// 				console.log(key + ' - time  value: ' + telefunkerOnsetTimes[key] + ' diff: ' + (telefunkerOnsetTimes[key] - min) + ' = samples: ' + ((telefunkerOnsetTimes[key] - min) * 44100));
-	// 				//console.log('max on: ' + maxKey + ' - ' + key + ' = ' + (max - telefunkerOnsetTimes[key]));
-	// 			}
-	// 		}
-	// 		console.log('________________________________________________________________________');
-	// }
+		for (i = 0; i < windowSize; i++) {
+			w = window[i];
+			windowSum += w;
+			windowSumOfSquare += w * w;
 
+			b = buffer[i];
+			bufferSum += b;
+			bufferSumOfSquare += b * b;
+		}
+
+		var windowMean = norm * windowSum;
+		var windowMeanOfSquare = norm * windowSumOfSquare;
+		var windowSquareOfmean = windowMean * windowMean;
+		var windowStdDev = 0;
+
+		if (windowMeanOfSquare > windowSquareOfmean)
+			windowStdDev = Math.sqrt(windowMeanOfSquare - windowSquareOfmean);
+
+		var bufferMean = norm * bufferSum;
+		var bufferMeanOfSquare = norm * bufferSumOfSquare;
+		var bufferSquareOfmean = bufferMean * bufferMean;
+		var bufferStdDev = 0;
+
+		if (bufferMeanOfSquare > bufferSquareOfmean)
+			bufferStdDev = Math.sqrt(bufferMeanOfSquare - bufferSquareOfmean);
+
+		var crossCorrSum = 0;
+
+		for (i = 0; i < windowSize; i++) {
+			w = window[i];
+			b = buffer[i];
+			crossCorrSum += (b - bufferMean) / bufferStdDev * (w - windowMean) / windowStdDev;
+		}
+
+		crossCorr[0] = norm * crossCorrSum;
+		//console.log('  ', crossCorr[0]);
+
+		for (var j = 1; j < crossCorrSize; j++) {
+			crossCorrSum = 0;
+
+			var prevB = buffer[j - 1];
+			var nextB = buffer[j + crossCorrSize - 1];
+			bufferSum += (nextB - prevB);
+			bufferSumOfSquare += (nextB * nextB - prevB * prevB);
+
+			for (i = 0; i < windowSize; i++) {
+				w = window[i];
+				b = buffer[i + j];
+				crossCorrSum += (b - bufferMean) / bufferStdDev * (w - windowMean) / windowStdDev;
+			}
+
+			crossCorr[j] = norm * crossCorrSum;
+			//console.log('  ', crossCorr[j]);
+		}
+
+		return crossCorr;
+	}
 
 	function reportClipping(values) {
 		var id = values.myID;
